@@ -131,6 +131,7 @@ pages.dash=async()=>{
   if(!d.fb.hasToken)warn.push('Facebook Page Token boshano hoyni (Settings > Facebook Connection)');
   if(!aiKeys)warn.push('Kono AI key boshano hoyni (Settings > AI providers)');
   if(!d.db)warn.push('Database connect nai');
+  if((d.broken||[]).length)warn.push('SECRET_KEY ager moto na, ei setting gulo pora jachche na: '+d.broken.join(', ')+'. Render e ager SECRET_KEY din ba abar boshan');
   if(d.fb.sigFailAt&&d.fb.sigFailAt>(d.fb.lastEventAt||0))warn.push('Facebook theke message ashche kintu App Secret mile nai ('+ago(d.fb.sigFailAt)+' age), tai bot reply dicche na. Settings > Facebook > App Secret thik korun ba khali rakhun');
   if(d.fb.lastSendError&&d.fb.lastSendErrorAt>(d.fb.lastSendOkAt||0))warn.push('Customer ke reply pathano jayni ('+ago(d.fb.lastSendErrorAt)+' age): '+d.fb.lastSendError);
   if(d.fb.standbyAt&&Date.now()-d.fb.standbyAt<86400000)warn.push('Message "standby" e ashche: onno app primary receiver. Facebook App > Messenger > Handover Protocol e ei app ke Primary Receiver korun');

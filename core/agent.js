@@ -134,7 +134,7 @@ const CORE_TOOLS = [
   fn('update_customer', 'Save customer details as soon as they are given.', { name: str, phone: str, address: str }),
   fn('calc_order', 'Calculate totals and send the order preview to the customer. Needs product code, qty and every required option.', { items: itemsSchema, inside_dhaka: { type: 'boolean' }, coupon: str, extra_discount_pct: { type: 'number' } }, ['items', 'inside_dhaka']),
   fn('place_order', 'Create the order ONLY after the customer explicitly confirmed the preview.', { payment_mode: { type: 'string', enum: ['cod', 'delivery_advance', 'full_advance'] }, customer_confirmed: { type: 'boolean' } }, ['payment_mode', 'customer_confirmed']),
-  fn('submit_payment', 'Record the payment details the customer typed. Never say the payment is confirmed.', { order_id: { type: 'integer' }, trx_id: str, sender_number: str, amount: { type: 'number', description: 'Optional. Leave empty if the customer paid the required advance amount.' } }, ['order_id', 'trx_id', 'sender_number']),
+  fn('submit_payment', 'Record the payment details the customer typed. Never say the payment is confirmed.', { order_id: { type: 'integer' }, trx_id: { type: 'string', description: 'Full TrxID, or the sender number, or its last 4 digits' }, sender_number: str, amount: { type: 'number', description: 'Optional. Leave empty if the customer paid the required advance amount.' } }, ['order_id', 'trx_id']),
   fn('order_status', 'Get the customer\'s order status.', { order_id: { type: 'integer' } }),
   fn('cancel_order', 'Cancel an order at the customer\'s request.', { order_id: { type: 'integer' }, reason: str }, ['order_id']),
   fn('change_order_items', 'Change products/qty/size of an order that has not shipped.', { order_id: { type: 'integer' }, items: itemsSchema }, ['order_id', 'items']),
@@ -177,6 +177,9 @@ const FIX = {
   amount_low: (r) => `They must send at least ${r.need} tk. Tell them softly.`,
   trx_already_used: () => 'This TrxID was already used. Ask them to check and send the correct one.',
   missing_customer_info: (r) => `Ask the customer ONLY for their ${r.need}${r.need === 'address' ? ' (full address with area, at least 8 characters)' : ''}.`,
+  bad_name: () => 'The name looks wrong. Ask for their real name once.',
+  bad_address: () => 'The address is too short. Ask for the full address (house/road, area, thana/district).',
+  invalid_phone: () => 'The phone number is not a valid Bangladeshi mobile number (11 digits, 01XXXXXXXXX). Ask again politely.',
   suspicious_phone: () => 'Politely ask for the correct mobile number.',
   customer_has_not_confirmed: () => 'Wait until the customer clearly says yes/confirm after the preview.',
   no_preview_yet: () => 'Call calc_order first, then wait for the customer to confirm.',
@@ -207,7 +210,12 @@ async function exec(ctx, name, a, c) {
         if (O.isFakePhone(ph) && ctx.channel !== 'test') return { error: 'suspicious_phone', hint: 'This number looks fake. Politely ask for the correct number.' };
         set.phone = ph;
       }
-      if (a.address) set.address = String(a.address).trim().slice(0, 250);
+      if (a.name && (String(a.name).replace(/[^\p{L}]/gu, '').length < 2)) return { error: 'bad_name' };
+      if (a.address) {
+        const ad = String(a.address).trim();
+        if (ad.length < 8 || !/\p{L}/u.test(ad)) return { error: 'bad_address' };
+        set.address = ad.slice(0, 250);
+      }
       if (!Object.keys(set).length) return { error: 'nothing_to_save' };
       await col('customers').updateOne({ psid: c.psid }, { $set: set });
       Object.assign(c, set);
@@ -223,7 +231,8 @@ async function exec(ctx, name, a, c) {
       await col('customers').updateOne({ psid: c.psid }, { $set: { draft: c.draft, interest: c.interest } });
       await sendRaw(ctx, O.previewText(r, c));
       const hint = S.get('upsell_on') && r.free_delivery_gap > 0 && r.free_delivery_gap <= 600 ? `Customer needs only ${r.free_delivery_gap} tk more for free delivery; you may mention it once.` : undefined;
-      return { preview_sent: true, total: r.total, delivery: r.delivery, discount: r.discount, payment_options: r.modes, hint };
+      await col('customers').updateOne({ psid: c.psid }, { $set: { pay_stage: null } }); c.pay_stage = null;
+      return { preview_sent: true, note: 'Preview already asks the customer to confirm. Write nothing more.', total: r.total, delivery: r.delivery, discount: r.discount, payment_options: r.modes, hint };
     }
     case 'place_order': {
       if (!a.customer_confirmed) return { error: 'customer_has_not_confirmed' };
@@ -241,8 +250,10 @@ async function exec(ctx, name, a, c) {
     case 'submit_payment': {
       const o = await ownOrder(c, a.order_id);
       if (!o) return { error: 'order_not_found' };
-      const r = await O.submitPayment(o, { trx: a.trx_id, sender: a.sender_number, amount: a.amount || o.required_now });
-      return r.ok ? { ok: true, note: 'Tell the customer the admin will verify the payment and the order confirms after that.' } : r;
+      const r = await O.submitPayment(o, { trx: a.trx_id, sender: a.sender_number || c.phone, amount: a.amount || o.required_now });
+      if (!r.ok) return r;
+      await sendRaw(ctx, 'Dhonnobad ji, payment er request peyechi. Admin verify korle order confirm hoye jabe.');
+      return { ok: true, messages_already_sent: true };
     }
     case 'order_status': {
       const q = { psid: c.psid };
@@ -287,8 +298,9 @@ async function nextStep(c, open) {
   const pay = (open || []).find((o) => o.status === 'awaiting_payment');
   if (pay) return `Order #${pay.id} waits for the advance payment of ${pay.required_now} tk (the amount is already known, do NOT ask for it). Collect only the TrxID and the sender number, then call submit_payment. Payment details were already sent; do not resend them.`;
   if ((open || []).some((o) => o.status === 'payment_review')) return 'Payment is with the admin for verification. Reassure the customer in one line; do not ask for payment again.';
+  if (c.pay_stage === 'method') return 'The customer must now pick the payment method (bKash/Nagad/Rocket). The server handles it; if they ask anything else, answer in one line and repeat that question.';
   if (c.draft) return 'The order preview was sent. Wait for the customer to confirm and choose the payment option; then call place_order. Do not recalculate unless they change something.';
-  const miss = [!c.phone && 'phone number', !c.address && 'full address'].filter(Boolean);
+  const miss = [!c.name && 'name', !c.phone && 'phone number', !c.address && 'full address'].filter(Boolean);
   if (c.interest && miss.length) return `If the customer has chosen a product and its options, ask for the missing: ${miss.join(' and ')} (ask in one message).`;
   return 'Help the customer find a product and move gently towards choosing options, then phone and address.';
 }
@@ -328,11 +340,12 @@ SELLING (be a warm, smart shopkeeper, never pushy)
 - Customer silent or unsure: end with a light, friendly line, not a question loop.
 
 ORDER FLOW
-1. Find product -> collect missing options and quantity -> collect missing phone and address (name too only if none is known) -> call update_customer when you get them.
+1. Find product -> collect missing options and quantity -> collect the customer's name, phone and full address (ask ALL missing ones in ONE short message) -> call update_customer when you get them. If a detail looks wrong or incomplete (short/fake phone, address without area), ask again politely.
 2. Decide inside_dhaka from the address (ask only if truly unclear). Delivery: inside Dhaka ${S.get('delivery_inside')} tk, outside ${S.get('delivery_outside')} tk${S.num('free_delivery_min') ? `, free delivery above ${S.get('free_delivery_min')} tk` : ''}. Delivery time: ${S.get('delivery_time')}.
-3. Call calc_order. The server sends the exact preview itself; do not retype it. Then tell the customer the payment options returned in payment_options (cod = pay on delivery, delivery_advance = pay only the delivery charge now, full_advance = pay everything now) and ask which one. If COD is not offered, say it is not available for now.
-4. When the customer confirms (and chose a payment option), call place_order. The server sends the confirmation/payment instructions itself. Add at most one short line.
-5. Payment: you can never confirm a payment. Collect TrxID, sender number and amount, call submit_payment, then say the admin will verify and the order confirms after that. A screenshot alone is not proof.
+3. Call calc_order. The server sends the order preview, which already asks the customer to confirm. Write NOTHING more after calc_order.
+4. The SERVER handles the rest by itself: confirmation, advance payment method (bKash/Nagad/Rocket), its number, and the TrxID. Never invent payment numbers or placeholders. If the customer asks something else meanwhile, answer in one short line and remind the next step.
+5. Payment proof: the customer may send the full TrxID, or the sender number, or its last 4 digits. Any of them is enough: call submit_payment (amount is optional). Never say a payment is confirmed; the admin verifies it.
+Say "Cash on Delivery", never "COD". Cash on Delivery is only offered when the server says so.
 6. Discount: only if the customer bargains, and only up to ${S.num('max_discount_pct')}% via extra_discount_pct. Otherwise say the price is fixed or ask the admin.
 7. Cancel or change: use cancel_order / change_order_items. If already shipped, call request_human.
 8. For "where is my order" use order_status. Statuses: pending = waiting admin approval, awaiting_payment = waiting for customer's payment, payment_review = admin is verifying payment, confirmed = being prepared, shipped, delivered, cancelled.
@@ -368,6 +381,109 @@ ${kbText}
 Now (Dhaka): ${dhakaNow().toISOString().slice(0, 16).replace('T', ' ')}`;
 }
 
+// ---------- server-driven order steps (confirm -> payment method -> proof) ----------
+const isYes = (t) => {
+  const s = String(t || '').toLowerCase().trim().replace(/[.!।]+$/, '');
+  if (!s || s.length > 40) return false;
+  if (/\b(na|nah|not|cancel|change|bad|thak|pore|later|wait)\b|না|বাদ|পরে/.test(s)) return false;
+  return /confirm|kon[fp]arm|কনফার্ম|thik ache|thik achhe|ঠিক আছে|nibo|নিব/.test(s) || /^(ok|okay|ji|jii|hya|hyan|ha|haa|hae|hea|hoy|yes|y|thik|sure|done|ওকে|জি|হ্যাঁ|হ্যা|ঠিক)$/.test(s);
+};
+async function payMethods() {
+  const ms = await col('pay_methods').find({ active: { $ne: false } }).toArray();
+  if (ms.length) return ms.map((m) => ({ name: String(m.name || '').trim(), number: String(m.number || '').trim(), note: String(m.note || '').trim() })).filter((m) => m.name);
+  return String(S.get('pay_numbers') || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf(':'); return i > 0 ? { name: l.slice(0, i).trim(), number: l.slice(i + 1).trim(), note: '' } : { name: l, number: '', note: '' }; });
+}
+const ALIAS = { bkash: ['বিকাশ', 'bikash', 'bkas'], nagad: ['নগদ', 'nogod'], rocket: ['রকেট'], upay: ['উপায়'] };
+function pickMethod(text, ms) {
+  const t = String(text || '').toLowerCase();
+  for (const m of ms) {
+    const n = m.name.toLowerCase().replace(/[^a-z\u0980-\u09ff]/g, '');
+    if (n && t.includes(n)) return m;
+    for (const [k, al] of Object.entries(ALIAS)) if (n.includes(k) && (t.includes(k) || al.some((a) => t.includes(a)))) return m;
+  }
+  return null;
+}
+const say = async (ctx, t) => { if (S.get('typing_delay') !== false) { await ctx.out.typing(); await sleep(700); } await sendRaw(ctx, t); return true; };
+const STATUS_TEXT = {
+  pending: (o) => `Order #${o.id} admin er approval er opekkhay ache ji.`,
+  awaiting_payment: (o) => `Order #${o.id} e ${O.money(o.required_now)} advance dile order confirm hobe ji.`,
+  payment_review: (o) => `Order #${o.id} er payment admin verify korche ji, shighroi confirm hobe.`,
+  confirmed: (o) => `Order #${o.id} confirm, ready kora hocche ji. Delivery ${S.get('delivery_time')}.`,
+  shipped: (o) => `Order #${o.id} pathano hoyeche ji.${o.tracking && o.tracking.code ? ` ${o.tracking.courier || 'Courier'}: ${o.tracking.code}` : ''}`,
+  delivered: (o) => `Order #${o.id} delivered hoyeche ji. Dhonnobad.`,
+  cancelled: (o) => `Order #${o.id} cancel kora hoyeche ji.`,
+  returned: (o) => `Order #${o.id} return hishebe dhora hoyeche ji.`,
+};
+
+async function createAndInstruct(ctx, c, mode, method) {
+  const r = await O.createOrder(c, mode, { test: ctx.channel === 'test' });
+  if (r.error) {
+    if (r.error === 'missing_customer_info') return say(ctx, `Apnar ${r.need === 'name' ? 'naam' : r.need === 'phone' ? 'phone number' : 'puro address'} ta din ji.`);
+    return false; // let the AI handle it (it receives a clear instruction)
+  }
+  const o = r.order;
+  c.pay_stage = null;
+  await col('customers').updateOne({ psid: c.psid }, { $set: { pay_stage: null } });
+  if (method) await col('orders').updateOne({ id: o.id }, { $set: { pay_method: method.name } });
+  if (o.status === 'confirmed') return say(ctx, O.summaryText(o));
+  if (o.status === 'pending') return say(ctx, `Order #${o.id} peyechi ji. Admin confirm korle janiye dibo.`);
+  return say(ctx, method && method.number ? await O.paymentInstructionsFor(o, method) : await O.paymentInstructions(o));
+}
+
+async function fastPath(ctx, c, text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  const orders = await col('orders').find({ psid: c.psid }).sort({ id: -1 }).limit(3).toArray();
+  const awaiting = orders.find((o) => o.status === 'awaiting_payment');
+  const review = orders.find((o) => o.status === 'payment_review');
+
+  // 1) "amar order koi?"
+  if (t.length < 60 && orders.length && !c.draft && /(order|অর্ডার).*(koi|kothay|kotodur|status|obostha|track|কই|কোথায়|স্ট্যাটাস)|^(amar|amr) order|delivery kobe|kobe pabo|কবে পাব/i.test(t)) {
+    return say(ctx, STATUS_TEXT[orders[0].status] ? STATUS_TEXT[orders[0].status](orders[0]) : `Order #${orders[0].id}: ${orders[0].status}`);
+  }
+  // 2) payment proof: TrxID / sender number / last 4 digits
+  if (awaiting) {
+    const ref = O.payRef(t);
+    if (ref) {
+      const r = await O.submitPayment(awaiting, { ...ref, sender: c.phone, amount: awaiting.required_now });
+      if (r.ok || r.error === 'trx_already_used') return say(ctx, 'Dhonnobad ji, payment er request peyechi. Admin verify korle order confirm hoye jabe.');
+      return false;
+    }
+  }
+  if (review && O.payRef(t) && !c.draft) return say(ctx, `Order #${review.id} er payment admin verify korche ji, shighroi janabo.`);
+
+  // 3) customer chose the payment method
+  if (c.draft && c.pay_stage === 'method') {
+    const ms = await payMethods();
+    const m = pickMethod(t, ms);
+    if (!m) return false;
+    const r = await O.calc(c, c.draft.items, c.draft.opts);
+    if (r.error) return false;
+    const adv = r.modes.filter((x) => x.mode !== 'cod').map((x) => x.mode);
+    const mode = adv.includes('delivery_advance') && !(adv.includes('full_advance') && /full|puro|pura|sob|shob|সব|পুরো|পুরা/i.test(t)) ? 'delivery_advance' : adv.includes('full_advance') ? 'full_advance' : adv[0];
+    if (!mode) return false;
+    return createAndInstruct(ctx, c, mode, m);
+  }
+  // 4) customer confirmed the preview
+  if (c.draft && isYes(t)) {
+    const r = await O.calc(c, c.draft.items, c.draft.opts);
+    if (r.error) return false;
+    if (r.modes.some((x) => x.mode === 'cod')) return createAndInstruct(ctx, c, 'cod', null);
+    const adv = r.modes.filter((x) => x.mode !== 'cod');
+    if (!adv.length) return false;
+    const ms = await payMethods();
+    if (ms.length === 1) return createAndInstruct(ctx, c, adv[0].mode, ms[0]);
+    c.pay_stage = 'method';
+    await col('customers').updateOne({ psid: c.psid }, { $set: { pay_stage: 'method' } });
+    const first = adv.find((x) => x.mode === 'delivery_advance') || adv[0];
+    const names = ms.map((m) => m.name);
+    const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' ba ' + names[names.length - 1] : names[0] || 'bKash/Nagad';
+    const extra = adv.length > 1 && first.mode === 'delivery_advance' ? ` (Chaile puro ${O.money(r.total)}-o dite paren)` : '';
+    return say(ctx, `Order confirm korte age ${O.money(first.pay_now)} advance dite hobe ji. ${list} kon ta e dibena?${extra}`);
+  }
+  return false;
+}
+
 // ---------- main ----------
 async function handle(ctx, input) {
   const c = (ctx.customer = await getCustomer(ctx));
@@ -393,6 +509,10 @@ async function handle(ctx, input) {
   await save(m.text);
   await col('customers').updateOne({ psid: c.psid }, { $set: { lastMsgAt: new Date() } });
   const isFirst = (await col('messages').countDocuments({ psid: c.psid })) <= 1;
+  try {
+    const typed = String(input.text || '') || (m.voice ? String(m.text).replace(/^\[Voice message transcript\]:\s*/, '') : '');
+    if (await fastPath(ctx, c, typed)) { L.ok('reply', `${c.name || c.fbname || c.psid}: server flow reply`); return; }
+  } catch (e) { L.error('agent', 'Fast path error: ' + e.message, e); }
 
   try {
     const hist = (await col('messages').find({ psid: c.psid }).sort({ t: -1 }).limit(12).toArray()).reverse().map((x) => ({ role: x.role, content: x.text }));
@@ -401,7 +521,7 @@ async function handle(ctx, input) {
     try { const q = String(input.text || '').replace(/\[[^\]]*\]/g, '').trim().slice(0, 150); if (q.length > 1) hits = (await P.search(q, 4)).filter((p) => p.active !== false); } catch {}
     const msgs = [{ role: 'system', content: await buildSystem(c, isFirst, m.voice, ctx.page && ctx.page.name, hits) }, ...hist];
     const tools = allTools();
-    let finalText = '';
+    let finalText = '', silent = false;
     for (let i = 0; i < 7; i++) {
       const r = await AI.chat('text', msgs, tools);
       const msg = r.message;
@@ -411,6 +531,7 @@ async function handle(ctx, input) {
           let args = {}, res;
           try { args = JSON.parse(tc.function.arguments || '{}'); } catch {}
           try { res = fixFor(await exec(ctx, tc.function.name, args, c)); } catch (e) { L.error('tool', `${tc.function.name} fail: ${e.message}`, e); res = { error: 'tool_failed', detail: e.message }; }
+          if (['calc_order', 'place_order', 'submit_payment'].includes(tc.function.name) && res && !res.error) silent = true;
           L.info('tool', `${tc.function.name} -> ${res && res.error ? 'error: ' + res.error : 'ok'}`);
           msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(res).slice(0, 3000) });
         }
@@ -419,7 +540,7 @@ async function handle(ctx, input) {
       finalText = String(msg.content || '').trim();
       break;
     }
-    await sendHuman(ctx, finalText);
+    if (!silent) await sendHuman(ctx, finalText);
     L.ok('reply', `${c.name || c.fbname || c.psid}: reply pathano hoyeche`);
   } catch (e) {
     L.error('agent', 'Reply dite parini: ' + e.message, e);

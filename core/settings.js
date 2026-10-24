@@ -2,6 +2,8 @@
 const crypto = require('crypto');
 const { col } = require('./db');
 const { enc, dec } = require('./crypto');
+const L = require('./logger');
+let broken = [];
 
 const DEFAULTS = {
   bot_on: true, messenger_on: true, comment_on: true,
@@ -41,8 +43,21 @@ function extend(fields) {
 
 async function load() {
   const d = await col('settings').findOne({ _id: 'main' });
+  const b = await col('settings').findOne({ _id: 'backup' }).catch(() => null);
+  const data = { ...((d && d.data) || {}) };
+  // safety net: if the main settings were wiped/partly lost, bring back what the backup copy still has
+  let restored = 0;
+  for (const [k, v] of Object.entries((b && b.data) || {})) {
+    if (v === '' || v == null) continue;
+    if (!(k in data) || (data[k] === '' && SECRETS.has(k))) { data[k] = v; restored++; }
+  }
+  if (restored) { await col('settings').updateOne({ _id: 'main' }, { $set: { data } }, { upsert: true }); L.warn('settings', `${restored} ta setting backup theke ferot ana hoyeche`); }
   cache = { ...DEFAULTS };
-  for (const [k, v] of Object.entries((d && d.data) || {})) cache[k] = SECRETS.has(k) && v ? dec(v) : v;
+  broken = [];
+  for (const [k, v] of Object.entries(data)) {
+    if (SECRETS.has(k) && v) { const x = dec(v); if (!x) broken.push(k); cache[k] = x; } else cache[k] = v;
+  }
+  if (broken.length) L.error('settings', `SECRET_KEY ager moto na: ${broken.join(', ')} decrypt hoyni. Render e SECRET_KEY ager ta-i din (ba ei key gulo abar boshan)`);
 }
 
 async function save(patch) {
@@ -64,6 +79,7 @@ async function save(patch) {
     cache[k] = v;
   }
   await col('settings').updateOne({ _id: 'main' }, { $set: { data: cur } }, { upsert: true });
+  await col('settings').updateOne({ _id: 'backup' }, { $set: { data: cur, savedAt: new Date() } }, { upsert: true }).catch(() => {});
 }
 
 const get = (k) => cache[k];
@@ -75,4 +91,4 @@ const masked = () => {
 };
 const randomToken = () => crypto.randomBytes(12).toString('hex');
 
-module.exports = { load, save, get, num, masked, extend, randomToken };
+module.exports = { brokenKeys: () => broken.slice(), load, save, get, num, masked, extend, randomToken };

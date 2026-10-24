@@ -41,6 +41,7 @@ r.get('/dashboard', wrap(async (q, s) => {
     counts, today: { orders: (today[0] && today[0].n) || 0, revenue: (today[0] && today[0].sum) || 0 },
     attention: await col('attention').countDocuments({ resolved: false }), unread: await col('notifications').countDocuments({ read: false }),
     unknown: await col('unknown').countDocuments({ answered: false }), tickets: await col('tickets').countDocuments({ status: { $ne: 'resolved' }, test: { $ne: true } }),
+    broken: S.brokenKeys(),
     bot: { bot_on: S.get('bot_on'), messenger_on: S.get('messenger_on'), comment_on: S.get('comment_on') },
     fb: { ...fb.status, hasToken: !!S.get('fb_page_token') }, ai, uptime: Math.round(process.uptime()), db: await ping().catch(() => false),
     webhook: { url: M.base() + '/webhook', verify: S.get('fb_verify_token') },

@@ -128,6 +128,15 @@ async function paymentInstructions(o) {
   ].join('\n');
 }
 
+async function paymentInstructionsFor(o, m) {
+  return [
+    `Order #${o.id} peyechi ji. ${money(o.required_now)} ${m.name} e Send Money korun:`,
+    `${m.number}${m.note ? ' (' + m.note + ')' : ''}`,
+    '',
+    'Pathiye TrxID likhe din (ba je number theke pathalen tar last 4 digit).',
+  ].join('\n');
+}
+
 // ---- order creation ----
 async function createOrder(customer, mode, { test = false } = {}) {
   const d = customer.draft;
@@ -214,19 +223,34 @@ async function setStatus(id, to, by = 'admin', note = '') {
   return n;
 }
 
-async function submitPayment(o, { trx, sender, amount }) {
+// What did the customer type as payment proof? full TrxID, full sender number, or last 4 digits of it
+function payRef(text) {
+  const s = String(text || '');
+  const toks = s.match(/[A-Za-z0-9]+/g) || [];
+  for (const t of toks) { const u = t.toUpperCase(); if (/^[A-Z0-9]{8,14}$/.test(u) && /\d/.test(u) && !normPhone(t)) return { trx: u }; }
+  for (const t of toks) { const p = normPhone(t); if (p) return { refType: 'number', ref: p }; }
+  const m = s.match(/(?<!\d)\d{4}(?!\d)/);
+  return m ? { refType: 'last4', ref: m[0] } : null;
+}
+
+async function submitPayment(o, { trx, sender, amount, ref, refType }) {
   if (!['awaiting_payment', 'payment_review'].includes(o.status)) return { error: 'not_waiting_for_payment' };
-  const t = String(trx || '').trim().toUpperCase();
-  if (!/^[A-Z0-9]{8,14}$/.test(t)) return { error: 'bad_trx_format' };
-  const ph = normPhone(sender);
-  if (!ph) return { error: 'bad_sender_number' };
+  if (!refType && trx) { const r = payRef(trx); if (r && r.refType && String(trx).replace(/\D/g, '').length <= 11 && !/[A-Za-z]/.test(String(trx))) { refType = r.refType; ref = r.ref; } }
+  let t = String(trx || '').trim().toUpperCase();
+  let ph = normPhone(sender);
+  if (refType) { t = `${refType === 'last4' ? 'LAST4' : 'NUMBER'}-${o.id}-${ref}`; ph = ph || ''; }
+  else {
+    if (!/^[A-Z0-9]{8,14}$/.test(t)) return { error: 'bad_trx_format' };
+    if (!ph) return { error: 'bad_sender_number' };
+  }
   const amt = Number(String(amount).replace(/[^\d.]/g, ''));
   if (!amt) return { error: 'bad_amount' };
   if (amt < o.required_now) return { error: 'amount_low', need: o.required_now, sent: amt };
   try { await col('payments').insertOne({ trx: t, orderId: o.id, sender: ph, amount: amt, at: new Date() }); }
   catch (e) { if (e.code === 11000) return { error: 'trx_already_used' }; throw e; }
   await col('orders').updateOne({ id: o.id }, { $set: { status: 'payment_review' }, $push: { payments: { trx: t, sender: ph, amount: amt, at: new Date(), state: 'review' }, history: { status: 'payment_review', t: new Date(), by: 'customer' } } });
-  if (!o.test) N.admin('payment_review', `Payment verify lagbe: order #${o.id}`, `TrxID ${t}\nSender ${ph}\nAmount ${money(amt)} (lagbe ${money(o.required_now)})`, o.id);
+  const proof = refType ? `Customer diyeche: ${refType === 'last4' ? 'sender number er last 4 digit' : 'sender number'} ${ref} (TrxID na, nijer account e check korun)` : `TrxID ${t}\nSender ${ph}`;
+  if (!o.test) N.admin('payment_review', `Payment verify lagbe: order #${o.id}`, `${proof}\nAmount ${money(amt)} (lagbe ${money(o.required_now)})`, o.id);
   return { ok: true };
 }
 
@@ -267,4 +291,4 @@ async function expireUnpaid() {
   for (const o of old) { await setStatus(o.id, 'cancelled', 'system', `payment ${hrs} ghontar moddhe ashe nai`).catch((e) => L.warn('order', e.message)); }
 }
 
-module.exports = { isFakePhone, normPhone, money, calc, previewText, summaryText, paymentInstructions, createOrder, setStatus, submitPayment, paymentReceived, paymentRejected, updateItems, expireUnpaid, OPEN, MODE_NAME, isTrusted };
+module.exports = { paymentInstructionsFor, payRef, isFakePhone, normPhone, money, calc, previewText, summaryText, paymentInstructions, createOrder, setStatus, submitPayment, paymentReceived, paymentRejected, updateItems, expireUnpaid, OPEN, MODE_NAME, isTrusted };
