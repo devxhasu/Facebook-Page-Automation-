@@ -1,5 +1,5 @@
 // The sales agent: builds the prompt, runs tools, sends human-like replies.
-const { col } = require('./db');
+const { col, nextId } = require('./db');
 const S = require('./settings');
 const L = require('./logger');
 const AI = require('./ai');
@@ -8,6 +8,7 @@ const P = require('./products');
 const O = require('./orders');
 const N = require('./notify');
 const M = require('./media');
+const Pages = require('./pages');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const modTools = new Map();
@@ -47,7 +48,7 @@ async function attention(c, reason) {
 async function getCustomer(ctx) {
   let c = await col('customers').findOne({ psid: ctx.psid });
   if (!c) {
-    c = { psid: ctx.psid, name: '', fbname: '', phone: '', address: '', orders_done: 0, createdAt: new Date(), test: ctx.channel === 'test' };
+    c = { psid: ctx.psid, name: '', fbname: '', phone: '', address: '', orders_done: 0, createdAt: new Date(), test: ctx.channel === 'test', pageId: ctx.page ? ctx.page.pageId : '' };
     if (ctx.channel === 'fb') { try { c.fbname = await fb.userName(ctx.psid); } catch (e) { L.warn('agent', 'Customer er naam paoa jayni: ' + e.message); } }
     await col('customers').insertOne(c);
     c = await col('customers').findOne({ psid: ctx.psid });
@@ -85,7 +86,21 @@ async function processMedia(ctx, input, c) {
         const path = await M.saveTemp(buf, mime);
         await col('orders').updateOne({ id: open.id }, { $push: { screenshots: path } });
         parts.push(`[Customer sent a payment screenshot for order #${open.id}. It is saved for the admin. It is NOT proof: you still need TrxID, sender number and amount typed by the customer.]`);
-      } else if (desc) parts.push(`[Customer sent a photo. It looks like: ${desc}. Search the catalog for it.]`);
+      } else if (desc) {
+        let match = null;
+        if (S.get('image_match_on')) {
+          try {
+            const withImg = (p) => (p.images || []).length > 0;
+            let cands = (await P.search(desc, 8)).filter(withImg).slice(0, 6);
+            if (cands.length < 4) for (const p of await P.all()) if (p.active && withImg(p) && !cands.find((x) => x.code === p.code) && cands.length < 6) cands.push(p);
+            cands = cands.map((p) => ({ code: p.code, name: p.name, variant: p.variant, url: M.abs(p.images[0]) })).filter((x) => x.url && !x.url.startsWith('/'));
+            if (cands.length) match = await AI.matchImage(buf, mime, cands);
+          } catch (e) { L.warn('agent', 'Chobi milano fail: ' + e.message); }
+        }
+        parts.push(match
+          ? `[Customer sent a photo. Catalog photo match: ${match.code} (confidence ${match.confidence}). It looks like: ${desc}. Verify with search_products and confirm with the customer before ordering.]`
+          : `[Customer sent a photo. It looks like: ${desc}. Search the catalog for it; no photo match was found.]`);
+      }
       else { parts.push('[Customer sent a photo you could not analyse. Ask what they want in words.]'); await attention(c, 'Customer chobi pathiyeche, AI bujhte parenni'); }
     } catch (e) { L.warn('agent', 'Chobi download fail: ' + e.message); parts.push('[Customer sent a photo that could not be opened. Ask them to type what they want.]'); }
   }
@@ -114,7 +129,7 @@ const fn = (name, description, properties, required = []) => ({ type: 'function'
 const str = { type: 'string' };
 const itemsSchema = { type: 'array', items: { type: 'object', properties: { code: str, qty: { type: 'integer' }, options: { type: 'object', additionalProperties: str } }, required: ['code'] } };
 const CORE_TOOLS = [
-  fn('search_products', 'Search the catalog by name, keyword or code. ALWAYS use before talking about any product, price or stock.', { query: str }, ['query']),
+  fn('search_products', 'Search the catalog by name, keyword or code. ALWAYS use before talking about any product, price or stock. For a budget or gift request leave query empty and set max_price (and optionally min_price).', { query: str, max_price: { type: 'number' }, min_price: { type: 'number' } }),
   fn('show_products', 'Send product photos to the customer (with a Pick button when several). Use when they ask for a photo, or when several products match and they must choose.', { codes: { type: 'array', items: str } }, ['codes']),
   fn('update_customer', 'Save customer details as soon as they are given.', { name: str, phone: str, address: str }),
   fn('calc_order', 'Calculate totals and send the order preview to the customer. Needs product code, qty and every required option.', { items: itemsSchema, inside_dhaka: { type: 'boolean' }, coupon: str, extra_discount_pct: { type: 'number' } }, ['items', 'inside_dhaka']),
@@ -123,6 +138,7 @@ const CORE_TOOLS = [
   fn('order_status', 'Get the customer\'s order status.', { order_id: { type: 'integer' } }),
   fn('cancel_order', 'Cancel an order at the customer\'s request.', { order_id: { type: 'integer' }, reason: str }, ['order_id']),
   fn('change_order_items', 'Change products/qty/size of an order that has not shipped.', { order_id: { type: 'integer' }, items: itemsSchema }, ['order_id', 'items']),
+  fn('create_ticket', 'Open a support ticket for a complaint, wrong or damaged item, return, exchange or refund request.', { type: { type: 'string', enum: ['complaint', 'return', 'exchange', 'refund', 'other'] }, details: str, order_id: { type: 'integer' } }, ['type', 'details']),
   fn('request_human', 'Escalate to the admin (complaint, return, angry customer, anything you cannot handle).', { reason: str }, ['reason']),
   fn('log_unknown_question', 'Save a question you could not answer from the catalog or knowledge base.', { question: str }, ['question']),
 ];
@@ -150,12 +166,26 @@ async function showProducts(ctx, codes) {
 
 async function exec(ctx, name, a, c) {
   switch (name) {
-    case 'search_products': return (await P.search(a.query)).map(P.brief);
-    case 'show_products': return showProducts(ctx, a.codes);
+    case 'search_products': {
+      const ps = await P.search(a.query || '', 6, { maxPrice: Number(a.max_price) || 0, minPrice: Number(a.min_price) || 0 });
+      const codes = new Set(ps.map((p) => p.code.toUpperCase()));
+      const bundles = (await col('bundles').find({ active: { $ne: false } }).toArray()).filter((b) => (b.codes || []).some((x) => codes.has(String(x).toUpperCase())));
+      return { products: ps.map(P.brief), bundles: bundles.map((b) => ({ name: b.name, product_codes: b.codes, bundle_price: b.price })) };
+    }
+    case 'show_products': {
+      const r = await showProducts(ctx, a.codes);
+      if (!r.error) { c.interest = { codes: a.codes, at: Date.now() }; await col('customers').updateOne({ psid: c.psid }, { $set: { interest: c.interest } }); }
+      return r;
+    }
     case 'update_customer': {
       const set = {};
       if (a.name) set.name = String(a.name).trim().slice(0, 60);
-      if (a.phone) { const ph = O.normPhone(a.phone); if (!ph) return { error: 'invalid_phone', hint: 'Needs a Bangladeshi mobile number like 01XXXXXXXXX' }; set.phone = ph; }
+      if (a.phone) {
+        const ph = O.normPhone(a.phone);
+        if (!ph) return { error: 'invalid_phone', hint: 'Needs a Bangladeshi mobile number like 01XXXXXXXXX' };
+        if (O.isFakePhone(ph) && ctx.channel !== 'test') return { error: 'suspicious_phone', hint: 'This number looks fake. Politely ask for the correct number.' };
+        set.phone = ph;
+      }
       if (a.address) set.address = String(a.address).trim().slice(0, 250);
       if (!Object.keys(set).length) return { error: 'nothing_to_save' };
       await col('customers').updateOne({ psid: c.psid }, { $set: set });
@@ -168,7 +198,8 @@ async function exec(ctx, name, a, c) {
       const r = await O.calc(c, items, opts);
       if (r.error) return r;
       c.draft = { items, opts, at: Date.now() };
-      await col('customers').updateOne({ psid: c.psid }, { $set: { draft: c.draft } });
+      c.interest = { codes: items.map((i) => i.code), at: Date.now() };
+      await col('customers').updateOne({ psid: c.psid }, { $set: { draft: c.draft, interest: c.interest } });
       await sendRaw(ctx, O.previewText(r, c));
       const hint = S.get('upsell_on') && r.free_delivery_gap > 0 && r.free_delivery_gap <= 600 ? `Customer needs only ${r.free_delivery_gap} tk more for free delivery; you may mention it once.` : undefined;
       return { preview_sent: true, total: r.total, delivery: r.delivery, discount: r.discount, payment_options: r.modes, hint };
@@ -183,7 +214,7 @@ async function exec(ctx, name, a, c) {
       const o = r.order;
       if (o.status === 'confirmed') await sendRaw(ctx, O.summaryText(o));
       else if (o.status === 'pending') await sendRaw(ctx, `Order #${o.id} peyechi. Admin confirm korle apnake janiye dibo.`);
-      else await sendRaw(ctx, O.paymentInstructions(o));
+      else await sendRaw(ctx, await O.paymentInstructions(o));
       return { order_id: o.id, status: o.status, pay_now: o.required_now, messages_already_sent: true };
     }
     case 'submit_payment': {
@@ -211,6 +242,13 @@ async function exec(ctx, name, a, c) {
       if (!o) return { error: 'order_not_found' };
       return O.updateItems(o, (a.items || []).map((i) => ({ code: i.code, qty: i.qty || 1, options: i.options || {} })));
     }
+    case 'create_ticket': {
+      const id = 1000 + (await nextId('ticket'));
+      const t = { id, psid: c.psid, pageId: c.pageId || '', name: c.name || c.fbname || c.psid, phone: c.phone, orderId: a.order_id || null, type: a.type, details: String(a.details || '').slice(0, 600), status: 'open', notes: [], test: ctx.channel === 'test', createdAt: new Date() };
+      await col('tickets').insertOne(t);
+      if (!t.test) N.admin('ticket', `Ticket #${id} (${a.type}) ${t.name}`, t.details, id);
+      return { ticket_id: id, note: 'Tell the customer their ticket number and that the admin will reply soon.' };
+    }
     case 'request_human': await attention(c, a.reason || 'Customer admin er shathe kotha bolte chay'); return { ok: true, note: 'Tell the customer the admin will reply soon.' };
     case 'log_unknown_question':
       await col('unknown').insertOne({ q: String(a.question || '').slice(0, 300), psid: c.psid, name: c.name || c.fbname, createdAt: new Date(), answered: false });
@@ -224,13 +262,15 @@ async function exec(ctx, name, a, c) {
 }
 
 // ---------- prompt ----------
-async function buildSystem(c, isFirst, voice) {
+async function buildSystem(c, isFirst, voice, pageName) {
+  const bundles = await col('bundles').find({ active: { $ne: false } }).toArray();
+  const bundleText = bundles.length ? `\n- Bundle offers (mention once if relevant; the server applies the price automatically when all products are in the cart): ${bundles.slice(0, 10).map((b) => `${b.name} = ${(b.codes || []).join(' + ')} for ${b.price} tk`).join('; ')}.` : '';
   const kb = await col('kb').find({ active: { $ne: false } }).toArray();
   const kbText = kb.map((k) => `- ${k.title}: ${k.content}`).join('\n').slice(0, 6000) || '(empty)';
   const open = await col('orders').find({ psid: c.psid, status: { $in: O.OPEN } }).sort({ id: -1 }).limit(3).toArray();
   const emoji = S.get('emoji_level') === 'none' ? 'Never use emoji.' : 'Almost never use emoji (at most one, rarely).';
   const greet = { auto: 'Greet like the customer does', salam: 'Greet with Salam', hello: 'Greet with Hello', none: 'Do not add any greeting' }[S.get('greeting_style')] || 'Greet like the customer does';
-  return `You are ${S.get('persona_name')}, chatting for the Facebook page "${S.get('page_name') || 'our shop'}", an online shop in Bangladesh. Write exactly like a real, polite shopkeeper on Messenger. Tone: ${S.get('tone')}.
+  return `You are ${S.get('persona_name')}, chatting for the Facebook page "${pageName || S.get('page_name') || 'our shop'}", an online shop in Bangladesh. Write exactly like a real, polite shopkeeper on Messenger. Tone: ${S.get('tone')}.
 
 STYLE
 - Very short messages: 1-2 lines each. Separate up to 3 short messages with a blank line. No lists, no bold, no headings, no "Dear customer", no "Thank you for contacting us".
@@ -243,6 +283,9 @@ TRUTH
 - Never invent products, prices, stock, policies or delivery times. Use search_products and the KNOWLEDGE below. If unsure, call log_unknown_question and say you will confirm with the admin.
 - Same product name may exist in several variants/codes. If more than one product matches, do NOT guess: call show_products with the matching codes and ask which one. Mention only the detail that differs.
 - Ask for size/color/etc. ONLY if the product has options. Use exactly the option values from the catalog.
+- Scarcity: each product result has low_stock. Only when low_stock is true you may say how many are left (the real stock number), once. Never mention scarcity otherwise.
+- Budget or gift request ("1000 tk er moddhe gift"): call search_products with empty query and max_price, then suggest 2-3 options.
+- Past choices (see KNOWN): if the product has the same option, suggest it ("ager bar M nilen, ei bar-o M?") but wait for the customer to confirm; never assume.${bundleText}
 
 ORDER FLOW
 1. Find product -> collect missing options and quantity -> collect missing phone and address (name too only if none is known) -> call update_customer when you get them.
@@ -253,11 +296,12 @@ ORDER FLOW
 6. Discount: only if the customer bargains, and only up to ${S.num('max_discount_pct')}% via extra_discount_pct. Otherwise say the price is fixed or ask the admin.
 7. Cancel or change: use cancel_order / change_order_items. If already shipped, call request_human.
 8. For "where is my order" use order_status. Statuses: pending = waiting admin approval, awaiting_payment = waiting for customer's payment, payment_review = admin is verifying payment, confirmed = being prepared, shipped, delivered, cancelled.
-9. Complaints, returns, anger, anything unclear: request_human and stay calm.
+9. Complaint, wrong or damaged item, return, exchange, refund: call create_ticket (with order_id if known) and tell the customer the ticket number. Anger or anything else you cannot handle: request_human. Stay calm.
+   If update_customer says suspicious_phone, politely ask the customer for their correct number.
 ${voice ? '10. The last message came from a voice message: repeat any phone number or address back and ask the customer to confirm before saving.' : ''}
 
 KNOWN ABOUT THIS CUSTOMER
-name: ${c.name || '(unknown)'} | facebook name: ${c.fbname || '(unknown)'} | phone: ${c.phone || '(unknown)'} | address: ${c.address || '(unknown)'} | delivered orders: ${c.orders_done || 0}
+name: ${c.name || '(unknown)'} | facebook name: ${c.fbname || '(unknown)'} | phone: ${c.phone || '(unknown)'} | address: ${c.address || '(unknown)'} | delivered orders: ${c.orders_done || 0} | past choices: ${c.prefs ? Object.entries(c.prefs).map(([k, v]) => k + ': ' + v).join(', ') : 'none'}
 ${c.draft ? `An order preview was already sent and is waiting for confirmation: ${JSON.stringify(c.draft.items)}` : ''}
 OPEN ORDERS: ${open.length ? open.map((o) => `#${o.id} ${o.status} total ${o.total} (${O.MODE_NAME[o.mode]})`).join('; ') : 'none'}
 
@@ -282,7 +326,7 @@ async function handle(ctx, input) {
     }
   };
   if (!test) {
-    if (!S.get('bot_on') || !S.get('messenger_on')) { await save(input.text || '[media]'); L.info('agent', 'Bot off, reply deini'); return once('offMsgAt', 360, S.get('bot_off_message')); }
+    if (!S.get('bot_on') || !S.get('messenger_on') || (ctx.page && (ctx.page.bot_on === false || ctx.page.messenger_on === false))) { await save(input.text || '[media]'); L.info('agent', 'Bot off, reply deini'); return once('offMsgAt', 360, S.get('bot_off_message')); }
     if (c.human_until && c.human_until > Date.now()) { await save(input.text || '[media]'); return L.info('agent', `AI paused for ${c.name || c.fbname || c.psid}`); }
     if (!inHours()) { await save(input.text || '[media]'); return once('hoursMsgAt', 180, S.get('outside_hours_message')); }
   }
@@ -296,7 +340,7 @@ async function handle(ctx, input) {
   try {
     const hist = (await col('messages').find({ psid: c.psid }).sort({ t: -1 }).limit(12).toArray()).reverse().map((x) => ({ role: x.role, content: x.text }));
     while (hist.length && hist[0].role !== 'user') hist.shift();
-    const msgs = [{ role: 'system', content: await buildSystem(c, isFirst, m.voice) }, ...hist];
+    const msgs = [{ role: 'system', content: await buildSystem(c, isFirst, m.voice, ctx.page && ctx.page.name) }, ...hist];
     const tools = allTools();
     let finalText = '';
     for (let i = 0; i < 7; i++) {
@@ -339,6 +383,38 @@ async function testChat(sessionId, text) {
   await handle({ psid: 'TEST-' + String(sessionId || 'admin').slice(0, 20), channel: 'test', out: testOut(buf) }, { text });
   return buf;
 }
-const forFb = (psid) => ({ psid, channel: 'fb', out: fbOut(psid) });
+const forFb = (psid, page) => ({ psid, page: page || null, channel: 'fb', out: fbOut(psid) });
 
-module.exports = { handle, testChat, forFb, registerTool, attention, getCustomer };
+// One gentle follow-up inside Facebook's 24h window for customers who showed interest and went quiet
+async function followUps() {
+  if (!S.get('follow_up_on')) return;
+  const hrs = Math.min(23, Math.max(1, S.num('follow_up_hours') || 20));
+  const now = Date.now();
+  const list = await col('customers').find({ lastMsgAt: { $gte: new Date(now - 23 * 3600e3), $lte: new Date(now - hrs * 3600e3) }, test: { $ne: true }, blocked: { $ne: true } }).limit(40).toArray();
+  let sent = 0;
+  for (const c of list) {
+    if (sent >= 15) break;
+    const last = +new Date(c.lastMsgAt);
+    if (c.followedFor === last || !c.interest || (c.lastOrderAt && +new Date(c.lastOrderAt) > c.interest.at) || (c.human_until && c.human_until > now)) continue;
+    const hist = (await col('messages').find({ psid: c.psid }).sort({ t: -1 }).limit(4).toArray()).reverse();
+    if (!hist.length || hist[hist.length - 1].role !== 'assistant') continue; // customer replied last, nothing to chase
+    try {
+      const names = [];
+      for (const code of c.interest.codes || []) { const p = await P.get(code); if (p) names.push(p.name); }
+      const r = await AI.chat('text', [
+        { role: 'system', content: 'Write ONE short, friendly follow-up message (max 2 lines) from a shopkeeper to a customer who went quiet. Use the same language/style as the customer. Ask softly if they still want the product. No pressure, no emoji, no discount.' },
+        { role: 'user', content: `Products: ${names.join(', ') || 'the product we discussed'}\nRecent chat:\n${hist.map((h) => h.role + ': ' + h.text).join('\n')}` },
+      ]);
+      const text = String(r.message.content || '').trim();
+      if (!text) continue;
+      const page = await Pages.byId(c.pageId);
+      await fb.runWith(page, () => fb.text(c.psid, text));
+      await col('messages').insertOne({ psid: c.psid, role: 'assistant', text, t: Date.now() });
+      await col('customers').updateOne({ psid: c.psid }, { $set: { followedFor: last } });
+      L.ok('followup', `Follow-up gelo: ${c.name || c.fbname || c.psid}`);
+      sent++;
+    } catch (e) { L.warn('followup', `Follow-up fail (${c.psid.slice(-6)}): ${e.message}`); await col('customers').updateOne({ psid: c.psid }, { $set: { followedFor: last } }); }
+  }
+}
+
+module.exports = { handle, testChat, forFb, followUps, registerTool, attention, getCustomer };

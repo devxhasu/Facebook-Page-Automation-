@@ -22,6 +22,7 @@ const S = require('./core/settings');
 const M = require('./core/media');
 const auth = require('./core/auth');
 const fb = require('./core/facebook');
+const Pages = require('./core/pages');
 const N = require('./core/notify');
 const O = require('./core/orders');
 const P = require('./core/products');
@@ -51,6 +52,7 @@ app.listen(port, () => L.info('boot', `Server port ${port} e shuru (DB connect h
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function timers() {
   setInterval(() => O.expireUnpaid().catch((e) => L.error('timer', e.message, e)), 10 * 60000);
+  setInterval(() => agent.followUps().catch((e) => L.error('followup', e.message, e)), 10 * 60000);
   // check Facebook token every 6h
   setInterval(async () => {
     if (!S.get('fb_page_token')) return;
@@ -84,7 +86,7 @@ async function boot() {
   await S.load();
   if (!S.get('fb_verify_token')) await S.save({ fb_verify_token: S.randomToken() });
   fb.hooks.onTokenError = (e) => N.admin('system', 'Facebook token kaj korche na', e.message);
-  modules.initAll(app, auth.require, { S, col, O, L, N, bus, agent, fb, P });
+  modules.initAll(app, [auth.require, auth.need('orders')], { S, col, O, L, N, bus, agent, fb, P, Pages });
   timers();
   state.ready = true; state.err = '';
   L.ok('boot', 'Shob ready. Panel khulun, Settings theke Facebook ar AI key boshan.');

@@ -16,12 +16,12 @@ function parseJson(t) {
   try { return JSON.parse(m[0]); } catch { return null; }
 }
 
-async function handle(v) {
+async function handle(v, page) {
   if (!v || v.item !== 'comment' || v.verb !== 'add') return;
-  if (!S.get('bot_on') || !S.get('comment_on')) return;
+  if (!S.get('bot_on') || !S.get('comment_on') || (page && (page.bot_on === false || page.comment_on === false))) return;
   const cid = v.comment_id, from = v.from || {}, text = String(v.message || '').trim();
   if (!cid || !text) return;
-  if (pageId && String(from.id) === pageId) return;               // our own comment
+  if (page && String(from.id) === String(page.pageId)) return;     // our own comment
   if (v.parent_id && v.post_id && v.parent_id !== v.post_id) return; // reply inside a thread
   try { await col('comments').insertOne({ _id: cid, createdAt: new Date() }); } catch { return; } // duplicate event
   const key = `${v.post_id}:${from.id}`;
@@ -34,7 +34,7 @@ async function handle(v) {
   if (!products.length) products = await P.search(text, 3);
 
   const priceRule = S.get('comment_price_public') ? 'You may mention the price in the public reply.' : 'Do NOT mention any price in the public reply.';
-  const sys = `You write replies to Facebook post comments for the shop "${S.get('page_name') || 'our shop'}" in Bangladesh. Output ONLY JSON: {"intent":"price|order|info|spam|abusive|other","public_reply":"","private_reply":""}.
+  const sys = `You write replies to Facebook post comments for the shop "${(page && page.name) || S.get('page_name') || 'our shop'}" in Bangladesh. Output ONLY JSON: {"intent":"price|order|info|spam|abusive|other","public_reply":"","private_reply":""}.
 intent "other" = only emoji, tag, like or unrelated: leave both replies empty. spam/abusive: leave both empty.
 public_reply: one short human line (max 12 words), vary the wording, same language as the comment (Bangla, Banglish or English), say details are sent in inbox. ${priceRule} No hashtags.
 private_reply: 2-3 short lines, same language, greeting like a real person, product name and price and available options taken ONLY from PRODUCT DATA, then ask what size/quantity they want. If PRODUCT DATA is empty, ask which product they mean. Never invent anything. Almost no emoji.`;

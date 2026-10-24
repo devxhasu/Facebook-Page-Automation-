@@ -6,6 +6,7 @@ const L = require('./logger');
 const fb = require('./facebook');
 const agent = require('./agent');
 const comments = require('./comments');
+const Pages = require('./pages');
 
 const router = express.Router();
 const queues = new Map();
@@ -36,15 +37,20 @@ router.post('/webhook', (req, res) => {
   if (b.object !== 'page') return;
   fb.status.lastEventAt = Date.now();
   for (const en of b.entry || []) {
-    for (const ev of en.messaging || []) onMessaging(ev);
-    for (const ch of en.changes || []) if (ch.field === 'feed') comments.handle(ch.value).catch((e) => L.error('comment', e.message, e));
+    Pages.byFbId(en.id).then((page) => {
+      if (!page) return L.warn('webhook', `Page ${en.id} er token nai (Settings > Facebook ba Pages e add korun)`);
+      for (const ev of en.messaging || []) onMessaging(ev, page);
+      for (const ch of en.changes || []) {
+        if (ch.field === 'feed') fb.runWith(page, () => comments.handle(ch.value, page)).catch((e) => L.error('comment', e.message, e));
+      }
+    }).catch((e) => L.error('webhook', e.message, e));
   }
 });
 
-function onMessaging(ev) {
+function onMessaging(ev, page) {
   const psid = ev.sender && ev.sender.id;
   if (!psid || (ev.message && ev.message.is_echo)) return;
-  queue(psid, async () => {
+  queue(psid, () => fb.runWith(page, async () => {
     const mid = (ev.message && ev.message.mid) || (ev.postback && ev.postback.mid);
     if (mid) { try { await col('mids').insertOne({ _id: mid, createdAt: new Date() }); } catch { return; } }
     const input = { text: '', images: [], audio: null, other: [] };
@@ -62,10 +68,10 @@ function onMessaging(ev) {
       }
     } else return;
     if (!input.text && !input.images.length && !input.audio && !input.other.length) return;
-    L.info('message', `Inbox: ${psid.slice(-6)} > "${(input.text || (input.audio ? 'voice' : input.images.length ? 'photo' : 'file')).slice(0, 60)}"`);
+    L.info('message', `${page.name || 'Page'}: ${psid.slice(-6)} > "${(input.text || (input.audio ? 'voice' : input.images.length ? 'photo' : 'file')).slice(0, 60)}"`);
     fb.seen(psid).catch(() => {});
-    await agent.handle(agent.forFb(psid), input);
-  });
+    await agent.handle(agent.forFb(psid, page), input);
+  }));
 }
 
 module.exports = { router };

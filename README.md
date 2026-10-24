@@ -32,6 +32,16 @@ HTTP monitor: `https://APP.onrender.com/health`, 5 minute por por.
 4. Permission lagbe: pages_messaging, pages_manage_metadata, pages_read_engagement, pages_manage_engagement. Live korte Facebook App Review lagte pare (nam ar niyom Facebook bodlate pare).
 5. Comment er jonno kon post e kon product: Data > post_links.
 
+## Extra (panel theke)
+- **Login**: owner = username `admin` + `ADMIN_PASSWORD`. Settings > Admin accounts e staff account banan, prottekke alada permission.
+- **Ekadhik page**: Settings > Facebook pages e aro page er token add korun. Ek webhook URL shob page e cholbe. Prottek page alada on/off.
+- **Payment number**: Data > pay_methods e bKash/Nagad/Rocket jotoi number, prottekta alada on/off.
+- **Bundle**: Data > bundles. **Coupon**: Data > coupons. **Comment post link**: Data > post_links.
+- **Ticket**: AI complaint/return/exchange/refund niye ticket kore, Inbox e dekhben, ar customer ke reply pathate parben (Facebook 24 ghonta niyom).
+- **Courier**: Settings e Steadfast ba Pathao key dile order e "Steadfast/Pathao te pathao" button ashe, delivered hole auto status.
+- **Follow-up**: customer chup thakle (default 20 ghonta pore) ekbar nitibhabe jiggesh kore. Settings > Delivery ar selling theke off kora jay.
+- Order e customer ke message na gele order e lal chinho ar Telegram/panel alert ashe, apni call korben.
+
 ## Notun feature (module)
 `modules/<naam>/index.js` banan: `{ title, version, fields:[...settings], init(ctx){ ctx.router..., ctx.agent.registerTool(...), ctx.bus.on('order:status',...) } }`.
 `modules/steadfast` dekhe nin. Core file e hat dite hoy na. Render e module deploy hoy git push diye.

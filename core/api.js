@@ -13,13 +13,22 @@ const agent = require('./agent');
 const comments = require('./comments');
 const modules = require('./modules');
 const schema = require('./schema');
+const auth = require('./auth');
+const Pages = require('./pages');
 
 const r = express.Router();
 const wrap = (f) => (req, res) => Promise.resolve(f(req, res)).catch((e) => { L.error('api', `${req.method} ${req.originalUrl}: ${e.message}`, e); res.status(500).json({ error: e.message }); });
-const GEN = { kb: ['title', 'content', 'active'], coupons: ['code', 'type', 'value', 'min', 'maxUses', 'active'], post_links: ['post_id', 'product_code', 'note'] };
+const GEN = { kb: ['title', 'content', 'active'], coupons: ['code', 'type', 'value', 'min', 'maxUses', 'active'], post_links: ['post_id', 'product_code', 'note'], pay_methods: ['name', 'number', 'note', 'active'], bundles: ['name', 'codes', 'price', 'active'] };
 const BACKUP = ['settings', 'products', 'customers', 'orders', 'payments', 'kb', 'coupons', 'post_links', 'counters', 'unknown', 'attention'];
 
-r.get('/me', (q, s) => s.json({ ok: true }));
+// permission per area (staff accounts only see what the owner allowed)
+const PERM = [[/^\/orders/, 'orders'], [/^\/(products|upload)/, 'products'], [/^\/(customers|attention|unknown|tickets)/, 'inbox'], [/^\/c\//, 'data'], [/^\/logs/, 'logs'],
+  [/^\/(schema|settings|connection|ai|modules|pages)/, 'settings'], [/^\/test-chat/, 'test'], [/^\/(system|backup|restore|users)/, 'owner']];
+r.use((q, s, next) => {
+  for (const [re, p] of PERM) if (re.test(q.path)) return auth.can(q.user, p) ? next() : s.status(403).json({ error: 'Ei kaj er permission nai' });
+  next();
+});
+r.get('/me', (q, s) => s.json({ ok: true, user: q.user }));
 
 r.get('/dashboard', wrap(async (q, s) => {
   const d = new Date(Date.now() + 6 * 3600e3); d.setUTCHours(0, 0, 0, 0);
@@ -31,7 +40,7 @@ r.get('/dashboard', wrap(async (q, s) => {
   s.json({
     counts, today: { orders: (today[0] && today[0].n) || 0, revenue: (today[0] && today[0].sum) || 0 },
     attention: await col('attention').countDocuments({ resolved: false }), unread: await col('notifications').countDocuments({ read: false }),
-    unknown: await col('unknown').countDocuments({ answered: false }),
+    unknown: await col('unknown').countDocuments({ answered: false }), tickets: await col('tickets').countDocuments({ status: { $ne: 'resolved' }, test: { $ne: true } }),
     bot: { bot_on: S.get('bot_on'), messenger_on: S.get('messenger_on'), comment_on: S.get('comment_on') },
     fb: { ...fb.status, hasToken: !!S.get('fb_page_token') }, ai, uptime: Math.round(process.uptime()), db: await ping().catch(() => false),
     webhook: { url: M.base() + '/webhook', verify: S.get('fb_verify_token') },
@@ -133,6 +142,7 @@ r.post('/c/:n', wrap(async (q, s) => {
   if (d.active !== undefined) d.active = d.active === true || d.active === 'true';
   for (const k of ['value', 'min', 'maxUses']) if (k in d) d[k] = Number(d[k]) || 0;
   if (n === 'coupons' && d.code) d.code = String(d.code).trim().toUpperCase();
+  if (n === 'bundles') { if (typeof d.codes === 'string') d.codes = d.codes.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean); if ('price' in d) d.price = Number(d.price) || 0; }
   if (n === 'post_links' && d.product_code) d.product_code = String(d.product_code).trim().toUpperCase();
   if (q.body._id) await col(n).updateOne({ _id: new ObjectId(q.body._id) }, { $set: d }); else await col(n).insertOne(d);
   s.json({ ok: true });
@@ -192,5 +202,62 @@ r.post('/restore', wrap(async (q, s) => {
   L.ok('system', `Restore hoyeche (${n} ta collection)`);
   s.json({ ok: true, collections: n });
 }));
+
+// ----- tickets (complaint / return / exchange / refund) -----
+r.get('/tickets', wrap(async (q, s) => {
+  const f = q.query.status ? { status: q.query.status } : { status: { $ne: 'resolved' } };
+  s.json(await col('tickets').find(f).sort({ id: -1 }).limit(100).toArray());
+}));
+r.post('/tickets/:id', wrap(async (q, s) => {
+  const id = Number(q.params.id), b = q.body || {};
+  const t = await col('tickets').findOne({ id });
+  if (!t) return s.status(404).json({ error: 'Ticket paoa jayni' });
+  const set = {}, notes = [];
+  if (['open', 'in_progress', 'resolved'].includes(b.status)) set.status = b.status;
+  if (b.note) notes.push({ t: new Date(), by: q.user.username, text: String(b.note).slice(0, 500) });
+  let sent = null;
+  if (b.reply) {
+    sent = await N.customer(t.psid, String(b.reply).slice(0, 900), { pageId: t.pageId, test: t.test });
+    notes.push({ t: new Date(), by: q.user.username, text: `Customer ke message ${sent ? 'gelo' : 'jayni (24 ghonta niyom)'}: ${String(b.reply).slice(0, 300)}` });
+  }
+  const upd = {};
+  if (Object.keys(set).length) upd.$set = set;
+  if (notes.length) upd.$push = { notes: { $each: notes } };
+  if (Object.keys(upd).length) await col('tickets').updateOne({ id }, upd);
+  s.json({ ok: true, sent });
+}));
+
+// ----- extra Facebook pages -----
+r.get('/pages', wrap(async (q, s) => s.json(await Pages.list())));
+r.post('/pages', wrap(async (q, s) => {
+  const tok = String((q.body || {}).token || '').trim();
+  if (!tok) return s.status(400).json({ error: 'Page Access Token din' });
+  try { const info = await Pages.add(tok); s.json({ ok: true, page: { id: info.id, name: info.name } }); } catch (e) { s.status(400).json({ error: e.message }); }
+}));
+r.post('/pages/:id', wrap(async (q, s) => { await Pages.update(q.params.id, q.body || {}); s.json({ ok: true }); }));
+r.delete('/pages/:id', wrap(async (q, s) => { await Pages.remove(q.params.id); s.json({ ok: true }); }));
+r.post('/pages/:id/subscribe', wrap(async (q, s) => { const p = await Pages.byFbId(q.params.id); if (!p) return s.status(404).json({ error: 'Page paoa jayni' }); await fb.runWith(p, () => fb.subscribe()); s.json({ ok: true }); }));
+r.get('/pages/:id/test', wrap(async (q, s) => {
+  const p = await Pages.byFbId(q.params.id);
+  if (!p) return s.status(404).json({ error: 'Page paoa jayni' });
+  try { const info = await fb.runWith(p, () => fb.pageInfo()); const sub = await fb.runWith(p, () => fb.subscribed()).catch(() => ({ data: [] })); s.json({ ok: true, name: info.name, fans: info.fan_count, subscribed: (sub.data || []).length > 0 }); } catch (e) { s.json({ ok: false, error: e.message }); }
+}));
+
+// ----- admin accounts (owner only) -----
+r.get('/users', wrap(async (q, s) => s.json((await col('users').find({}).toArray()).map((u) => ({ username: u.username, perms: u.perms || [], active: u.active !== false })))));
+r.post('/users', wrap(async (q, s) => {
+  const b = q.body || {}, name = String(b.username || '').trim().toLowerCase();
+  if (!/^[a-z0-9_.-]{3,30}$/.test(name) || name === 'admin') return s.status(400).json({ error: 'Username 3-30 ta english akkhor/number hobe (admin cholbe na)' });
+  const set = { perms: (b.perms || []).filter((p) => auth.PERMS.includes(p)), active: b.active !== false };
+  if (b.password) {
+    if (String(b.password).length < 8) return s.status(400).json({ error: 'Password komopokkhe 8 akkhor' });
+    set.pass = auth.hashPw(b.password);
+  } else if (!(await col('users').findOne({ username: name }))) return s.status(400).json({ error: 'Notun user er jonno password din' });
+  await col('users').updateOne({ username: name }, { $set: set, $setOnInsert: { username: name, createdAt: new Date() } }, { upsert: true });
+  auth.bust();
+  L.ok('users', `Admin account save: ${name}`);
+  s.json({ ok: true });
+}));
+r.delete('/users/:u', wrap(async (q, s) => { await col('users').deleteOne({ username: q.params.u }); auth.bust(); s.json({ ok: true }); }));
 
 module.exports = r;

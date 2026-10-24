@@ -33,6 +33,18 @@ module.exports = {
       } catch (e) { L.error('steadfast', e.message, e); res.status(500).json({ error: e.message }); }
     });
 
+    // every 30 min: shipped Steadfast orders -> delivered when Steadfast says so
+    setInterval(async () => {
+      if (!ready() || S.get('mod_steadfast_on') === false) return;
+      try {
+        for (const o of await col('orders').find({ status: 'shipped', 'tracking.courier': 'Steadfast' }).limit(20).toArray()) {
+          const r = await fetch(`${BASE}/status_by_trackingcode/${encodeURIComponent(o.tracking.code)}`, { headers: headers(), signal: AbortSignal.timeout(20000) });
+          const j = await r.json().catch(() => ({}));
+          if (j.delivery_status === 'delivered') await O.setStatus(o.id, 'delivered', 'system', 'Steadfast sync');
+        }
+      } catch (e) { L.warn('steadfast', 'Sync fail: ' + e.message); }
+    }, 30 * 60000).unref();
+
     router.get('/track/:id', async (req, res) => {
       try {
         const o = await col('orders').findOne({ id: Number(req.params.id) });

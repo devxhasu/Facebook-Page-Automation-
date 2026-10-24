@@ -26,7 +26,7 @@ function initAll(app, auth, base) {
       const ctx = { ...base, router, name };
       if (mod.init) mod.init(ctx);
       const gate = (req, res, next) => (S.get(`mod_${name}_on`) !== false ? next() : res.status(400).json({ error: 'Module off ache' }));
-      app.use(`/api/mod/${name}`, auth, gate, router);
+      app.use(`/api/mod/${name}`, ...[].concat(auth), gate, router);
       L.ok('module', `${name} v${mod.version || '1'} chalu`);
     } catch (e) { L.error('module', `${name} init fail: ${e.message}`, e); }
   }

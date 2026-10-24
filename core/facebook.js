@@ -1,11 +1,16 @@
 const S = require('./settings');
 const L = require('./logger');
+const { AsyncLocalStorage } = require('async_hooks');
+const als = new AsyncLocalStorage();
+// run code with a specific page's token (multi page support)
+const runWith = (page, fn) => als.run(page || null, fn);
+const curToken = () => { const p = als.getStore(); return (p && p.token) || S.get('fb_page_token'); };
 const GV = 'v21.0';
 const status = { lastOkAt: 0, lastError: '', lastEventAt: 0, tokenInvalid: false };
 const hooks = { onTokenError: null };
 
 async function graph(path, { method = 'GET', body } = {}) {
-  const token = S.get('fb_page_token');
+  const token = curToken();
   if (!token) throw new Error('Facebook Page Token set kora nai (Settings > Facebook)');
   const headers = { Authorization: 'Bearer ' + token };
   if (body) headers['Content-Type'] = 'application/json';
@@ -45,4 +50,4 @@ async function debugToken() {
   return j.data || null;
 }
 
-module.exports = { status, hooks, graph, text, image, carousel, typing, seen, privateReply, replyComment, hideComment, pageInfo, userName, subscribe, subscribed, debugToken };
+module.exports = { runWith, status, hooks, graph, text, image, carousel, typing, seen, privateReply, replyComment, hideComment, pageInfo, userName, subscribe, subscribed, debugToken };

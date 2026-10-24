@@ -33,13 +33,14 @@ module.exports = [
   ] },
   { id: 'pay', title: 'Payment ar order niyom', fields: [
     B('pay_cod', 'Cash on Delivery'), B('pay_delivery_adv', 'Delivery charge advance'), B('pay_full_adv', 'Full advance'),
-    A('pay_numbers', 'Payment number gulo (customer ke dekhabe)', 'Ek line e ekta: bKash: 017... (Personal)'), A('pay_note', 'Payment instruction'),
+    A('pay_numbers', 'Fallback payment number (Data > pay_methods khali thakle eta dekhabe)', 'Ek line e ekta: bKash: 017... (Personal)'), A('pay_note', 'Payment instruction'),
     B('new_customer_cod', 'Notun customer COD pabe'), N('trusted_after', 'Koto ta delivered order er por COD trusted', 'Trusted na hole COD pabe na (notun customer COD off thakle)'),
     N('auto_cancel_hours', 'Payment na dile koto ghonta pore auto cancel (0 = off)'), N('max_orders_per_day', 'Ek customer er ekdin e max order'),
   ] },
   { id: 'sales', title: 'Delivery ar selling', fields: [
     N('delivery_inside', 'Dhaka er vitore delivery charge'), N('delivery_outside', 'Dhaka er baire delivery charge'), N('free_delivery_min', 'Free delivery (koto takar upore, 0 = off)'),
-    N('max_discount_pct', 'AI shorbocho koto % discount dite parbe'), B('upsell_on', 'Free delivery nudge / upsell'), N('low_stock', 'Stock koto ta er niche hole alert'),
+    N('max_discount_pct', 'AI shorbocho koto % discount dite parbe'), B('upsell_on', 'Free delivery nudge / upsell'), N('low_stock', 'Stock koto ta er niche hole alert ar AI "X ta baki" bolte parbe'),
+    B('follow_up_on', '24 ghontar moddhe ekbar follow-up ("ekhono nite chan?")'), N('follow_up_hours', 'Customer chup thakle koto ghonta pore follow-up (max 23)'), B('image_match_on', 'Customer er chobi catalog er chobir shathe milabe'),
   ] },
   { id: 'comments', title: 'Comment reply', fields: [
     B('comment_public_reply', 'Public reply dibe'), B('comment_private_reply', 'Inbox e private reply dibe'), B('comment_price_public', 'Public reply te dam bolbe'),
@@ -47,7 +48,7 @@ module.exports = [
   ] },
   { id: 'notify', title: 'Notification', fields: [
     B('tg_on', 'Telegram notification'), X('tg_token', 'Telegram Bot Token'), T('tg_chat', 'Telegram Chat ID'),
-    T('tg_events', 'Kon kon event (khali = shob)', 'order_new, order_approval, payment_review, order_cancel, attention, system, low_stock, daily_report'), B('daily_report', 'Roj raat 10 tay daily report'),
+    T('tg_events', 'Kon kon event (khali = shob)', 'order_new, order_approval, payment_review, order_cancel, attention, ticket, system, low_stock, daily_report'), B('daily_report', 'Roj raat 10 tay daily report'),
   ] },
   { id: 'img', title: 'Image hosting', fields: [ X('imgbb_key', 'ImgBB API key (free)', 'Khali thakle chobi MongoDB te save hobe') ] },
 ];

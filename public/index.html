@@ -58,6 +58,7 @@ pre{white-space:pre-wrap;word-break:break-word;margin:0;font:12px/1.5 ui-monospa
 <body>
 <div id="login" hidden>
   <div class="card"><h3>Admin login</h3><div id="boot" class="sm mu" style="margin-bottom:8px"></div>
+  <input id="un" value="admin" placeholder="Username" autocomplete="username" style="margin-bottom:8px">
   <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
   <div style="height:10px"></div><button class="btn p" style="width:100%" data-a="login">Login</button></div>
 </div>
@@ -73,6 +74,7 @@ const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>Math.round(Number(n)||0).toLocaleString('en-US')+' tk';
 const TABS=[['dash','Home'],['orders','Orders'],['products','Products'],['inbox','Inbox'],['logs','Logs'],['data','Data'],['settings','Settings'],['test','Test chat']];
+let ME={role:'staff',perms:[]};const TABPERM={orders:'orders',products:'products',inbox:'inbox',logs:'logs',data:'data',settings:'settings',test:'test'};
 let page='dash',es=null,mods=[],pf=null,dataTab='kb',dataEdit=null,sess=Math.random().toString(36).slice(2,9);
 
 async function api(p,o={}){
@@ -89,8 +91,8 @@ const run=async(fn)=>{try{return await fn()}catch(e){toast(e.message,true)}};
 
 function showLogin(){$('#app').hidden=true;$('#login').hidden=false;fetch('/health').then(r=>r.json()).then(h=>{$('#boot').textContent=h.error||''}).catch(()=>{})}
 async function start(){
-  try{await api('/me');$('#login').hidden=true;$('#app').hidden=false;
-    $('#tabs').innerHTML=TABS.map(t=>`<button data-a="tab" data-p="${t[0]}">${t[1]}</button>`).join('');
+  try{ME=(await api('/me')).user;$('#login').hidden=true;$('#app').hidden=false;
+    $('#tabs').innerHTML=TABS.filter(t=>!TABPERM[t[0]]||ME.role==='owner'||ME.perms.includes(TABPERM[t[0]])).map(t=>`<button data-a="tab" data-p="${t[0]}">${t[1]}</button>`).join('');
     mods=await api('/modules').catch(()=>[]);go(location.hash.slice(1)||'dash');poll()}
   catch{showLogin()}
 }
@@ -124,6 +126,7 @@ pages.dash=async()=>{
     <div class="stat"><b>${c.payment_review||0}</b><span>Payment verify</span></div>
     <div class="stat"><b>${d.attention}</b><span>Needs attention</span></div>
     <div class="stat"><b>${d.unknown}</b><span>AI jane na (proshno)</span></div>
+    <div class="stat"><b>${d.tickets||0}</b><span>Open ticket</span></div>
   </div><div style="height:12px"></div>
   <div class="card"><h3>Facebook connection</h3><div id="conn" class="sm mu">Last event: ${d.fb.lastEventAt?ago(d.fb.lastEventAt)+' age':'ekhono kono event ashe nai'}</div>
     <div class="row" style="margin-top:8px"><button class="btn s p" data-a="conn">Test connection</button><button class="btn s" data-a="subscribe">Webhook subscribe</button></div>
@@ -148,14 +151,16 @@ pages.orders=async()=>{
     if(o.status==='confirmed')acts.push(['ship','Shipped','p'],['st:cancelled','Cancel','d']);
     if(o.status==='shipped')acts.push(['st:delivered','Delivered','p'],['st:returned','Returned','d']);
     const sf=mods.find(m=>m.name==='steadfast'&&m.enabled)&&o.status==='confirmed';
-    return `<details><summary><div class="row sp"><b>#${o.id} ${esc(o.name)}</b>${badge(o.status)}</div><div class="sm mu">${money(o.total)} | ${esc(o.mode)}${o.test?' | TEST':''}${(o.flags||[]).includes('duplicate')?' | duplicate?':''}${o.refund_pending?' | REFUND pending':''}</div></summary><div>
+    const pt=mods.find(m=>m.name==='pathao'&&m.enabled)&&o.status==='confirmed';
+    return `<details><summary><div class="row sp"><b>#${o.id} ${esc(o.name)}</b>${badge(o.status)}</div><div class="sm mu">${money(o.total)} | ${esc(o.mode)}${o.test?' | TEST':''}${(o.flags||[]).includes('duplicate')?' | duplicate?':''}${o.notice_failed?' | CUSTOMER KE MESSAGE JAYNI':''}${o.refund_pending?' | REFUND pending':''}</div></summary><div>
       ${o.lines.map(l=>`<div>${esc(l.name)}${l.variant?' ('+esc(l.variant)+')':''} ${Object.entries(l.options||{}).map(([k,v])=>esc(k)+': '+esc(v)).join(', ')} x ${l.qty} = ${money(l.total)}</div>`).join('')}
       <div class="sm mu">Delivery ${money(o.delivery)} | Total ${money(o.total)} | Paid ${money(o.paid||0)} | Pay now needed ${money(o.required_now)}</div>
+      ${o.notice_failed?`<div class="sm" style="color:var(--er);margin-top:6px">Customer ke message jayni (Facebook 24 ghonta niyom). Call korun: ${esc(o.phone)}</div>`:''}
       <div style="margin-top:6px">${esc(o.phone)}<br>${esc(o.address)}</div>
       ${(o.payments||[]).map(p=>`<div class="sm" style="margin-top:6px"><span class="badge b-wa">${esc(p.state)}</span> TrxID <b>${esc(p.trx)}</b> | ${esc(p.sender)} | ${money(p.amount)}</div>`).join('')}
       ${(o.screenshots||[]).map(u=>`<a href="${esc(u)}" target="_blank" class="sm">Screenshot</a> `).join('')}
       ${o.tracking?`<div class="sm">Tracking: ${esc(o.tracking.courier)} ${esc(o.tracking.code)}</div>`:''}
-      <div class="row" style="margin-top:8px">${acts.map(a=>`<button class="btn s ${a[2]||''}" data-a="oact" data-id="${o.id}" data-x="${a[0]}">${a[1]}</button>`).join('')}${sf?`<button class="btn s" data-a="steadfast" data-id="${o.id}">Steadfast e pathao</button>`:''}${o.refund_pending?`<button class="btn s" data-a="oact" data-id="${o.id}" data-x="refunded">Refund holo</button>`:''}${o.test?`<button class="btn s d" data-a="oact" data-id="${o.id}" data-x="delete">Delete</button>`:''}</div>
+      <div class="row" style="margin-top:8px">${acts.map(a=>`<button class="btn s ${a[2]||''}" data-a="oact" data-id="${o.id}" data-x="${a[0]}">${a[1]}</button>`).join('')}${sf?`<button class="btn s" data-a="steadfast" data-id="${o.id}">Steadfast e pathao</button>`:''}${pt?`<button class="btn s" data-a="pathao" data-id="${o.id}">Pathao te pathao</button>`:''}${o.refund_pending?`<button class="btn s" data-a="oact" data-id="${o.id}" data-x="refunded">Refund holo</button>`:''}${o.test?`<button class="btn s d" data-a="oact" data-id="${o.id}" data-x="delete">Delete</button>`:''}</div>
       <div class="sm mu" style="margin-top:6px">${(o.history||[]).map(h=>esc(h.status)+' ('+esc(h.by)+')').join(' > ')}</div></div></details>`}).join('')||'<div class="mu">Kono order nai</div>');
 };
 /* ---------- PRODUCTS ---------- */
@@ -187,8 +192,9 @@ function readPF(){document.querySelectorAll('[data-pf]').forEach(e=>{pf[e.datase
 function resize(file){return new Promise((ok,no)=>{const img=new Image();img.onload=()=>{const m=1000;let w=img.width,h=img.height;if(Math.max(w,h)>m){const s=m/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s)}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);URL.revokeObjectURL(img.src);ok(c.toDataURL('image/jpeg',.82))};img.onerror=()=>no(new Error('Image pora jayni'));img.src=URL.createObjectURL(file)})}
 /* ---------- INBOX ---------- */
 pages.inbox=async()=>{
-  const [att,unk,cus]=await Promise.all([api('/attention'),api('/unknown'),api('/customers')]);
-  $('#main').innerHTML=`<div class="card"><h3>Needs attention (${att.length})</h3>${att.map(a=>`<div class="n"><b>${esc(a.name)}</b> <span class="mu sm">${ago(new Date(a.createdAt))}</span><div>${esc(a.reason)}</div><div class="row" style="margin-top:6px"><button class="btn s" data-a="ares" data-id="${a._id}">Resolved</button><button class="btn s" data-a="cust" data-p="${esc(a.psid)}" data-x="pause">AI pause</button></div></div>`).join('')||'<div class="mu">Kichu nai</div>'}</div>
+  const [att,unk,cus,tk]=await Promise.all([api('/attention'),api('/unknown'),api('/customers'),api('/tickets')]);
+  $('#main').innerHTML=`<div class="card"><h3>Tickets (${tk.length})</h3>${tk.map(t=>`<div class="n"><b>#${t.id} ${esc(t.type)}</b> ${badge(t.status)} <span class="mu sm">${esc(t.name)} ${esc(t.phone||'')}${t.orderId?' | order #'+t.orderId:''}</span><div>${esc(t.details)}</div>${(t.notes||[]).map(n=>`<div class="sm mu">- ${esc(n.by)}: ${esc(n.text)}</div>`).join('')}<textarea id="tr-${t.id}" placeholder="Customer ke message (24 ghontar moddhe gele jabe) ba internal note"></textarea><div class="row" style="margin-top:6px"><button class="btn s" data-a="tkreply" data-id="${t.id}">Customer ke pathao</button><button class="btn s" data-a="tknote" data-id="${t.id}">Note</button><button class="btn s" data-a="tkst" data-id="${t.id}" data-s="in_progress">In progress</button><button class="btn s p" data-a="tkst" data-id="${t.id}" data-s="resolved">Resolved</button></div></div>`).join('')||'<div class="mu">Kono open ticket nai</div>'}</div>
+  <div class="card"><h3>Needs attention (${att.length})</h3>${att.map(a=>`<div class="n"><b>${esc(a.name)}</b> <span class="mu sm">${ago(new Date(a.createdAt))}</span><div>${esc(a.reason)}</div><div class="row" style="margin-top:6px"><button class="btn s" data-a="ares" data-id="${a._id}">Resolved</button><button class="btn s" data-a="cust" data-p="${esc(a.psid)}" data-x="pause">AI pause</button></div></div>`).join('')||'<div class="mu">Kichu nai</div>'}</div>
   <div class="card"><h3>AI jane na (${unk.length})</h3><div class="sm mu">Uttor likhe dile Knowledge e save hoye AI shikhe nibe</div>${unk.map(u=>`<div class="n"><b>${esc(u.q)}</b><textarea id="ua-${u._id}" placeholder="Uttor"></textarea><button class="btn s p" data-a="uans" data-id="${u._id}" style="margin-top:6px">Save</button></div>`).join('')}</div>
   <div class="card"><h3>Customers</h3>${cus.map(c=>`<div class="n"><b>${esc(c.name||c.fbname||c.psid)}</b> ${c.blocked?'<span class="badge b-er">blocked</span>':''}${c.human_until>Date.now()?'<span class="badge b-wa">AI paused</span>':''}<div class="sm mu">${esc(c.phone||'-')} | delivered ${c.orders_done||0}</div><div class="row" style="margin-top:4px">${c.blocked?`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="unblock">Unblock</button>`:`<button class="btn s d" data-a="cust" data-p="${esc(c.psid)}" data-x="block">Block</button>`}${c.human_until>Date.now()?`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="resume">AI resume</button>`:`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="pause">AI pause</button>`}</div></div>`).join('')||'<div class="mu">Customer nai</div>'}</div>`;
 };
@@ -209,24 +215,29 @@ pages.logs=async()=>{
 /* ---------- DATA (knowledge, coupons, post links) ---------- */
 const DATA={kb:{t:'Knowledge (AI eta dekhe uttor dey)',f:[['title','Title / proshno'],['content','Uttor / details','area'],['active','Active','bool']]},
  coupons:{t:'Coupon',f:[['code','Code'],['type','Type','select',['percent','flat']],['value','Value (% ba tk)'],['min','Minimum order (tk)'],['maxUses','Max use (0 = unlimited)'],['active','Active','bool']]},
- post_links:{t:'Post → Product link (comment er jonno)',f:[['post_id','Post ID (jemon 1234_5678)'],['product_code','Product code (P-101)'],['note','Note']]}};
+ post_links:{t:'Post → Product link (comment er jonno)',f:[['post_id','Post ID (jemon 1234_5678)'],['product_code','Product code (P-101)'],['note','Note']]},
+ pay_methods:{t:'Payment method (customer ke ei number dekhabe, prottekta on/off)',f:[['name','Naam (bKash, Nagad...)'],['number','Number'],['note','Note (Personal / Merchant)'],['active','Active','bool']]},
+ bundles:{t:'Bundle offer (shob product cart e thakle bundle price)',f:[['name','Offer naam'],['codes','Product code (comma diye): P-101,P-102'],['price','Bundle price (tk)'],['active','Active','bool']]}};
 pages.data=async()=>{
   const cfg=DATA[dataTab],list=await api('/c/'+dataTab),e=dataEdit||{};
   $('#main').innerHTML=`<div class="chips">${Object.keys(DATA).map(k=>`<span class="chip ${dataTab===k?'on':''}" data-a="dtab" data-k="${k}">${k}</span>`).join('')}</div>
   <div class="card"><h3>${cfg.t}</h3>${cfg.f.map(([k,l,t,o])=>t==='area'?`<label>${l}</label><textarea data-df="${k}">${esc(e[k])}</textarea>`:t==='bool'?sw3(k,l,e[k]!==false&&(e[k]!==undefined||true)):t==='select'?`<label>${l}</label><select data-df="${k}">${o.map(x=>`<option ${e[k]===x?'selected':''}>${x}</option>`).join('')}</select>`:`<label>${l}</label><input data-df="${k}" value="${esc(e[k])}">`).join('')}
   <div class="row" style="margin-top:10px"><button class="btn p" data-a="dsave">${e._id?'Update':'Add'}</button>${e._id?'<button class="btn" data-a="dcancel">Cancel</button>':''}</div></div>
-  ${list.map(x=>`<div class="card"><div class="row sp"><div style="flex:1"><b>${esc(x.title||x.code||x.post_id)}</b>${x.active===false?' <span class="badge b-er">off</span>':''}<div class="sm mu">${esc(x.content||[x.type,x.value,x.product_code,x.note].filter(Boolean).join(' | '))}</div></div><div class="row"><button class="btn s" data-a="dedit" data-id="${x._id}">Edit</button><button class="btn s d" data-a="ddel" data-id="${x._id}">Del</button></div></div></div>`).join('')}`;
+  ${list.map(x=>`<div class="card"><div class="row sp"><div style="flex:1"><b>${esc(x.title||x.name||x.code||x.post_id)}</b>${x.active===false?' <span class="badge b-er">off</span>':''}<div class="sm mu">${esc(x.content||[x.type,x.value,x.product_code,x.number,(x.codes||[]).join?x.codes.join('+'):'',x.price,x.note].filter(Boolean).join(' | '))}</div></div><div class="row"><button class="btn s" data-a="dedit" data-id="${x._id}">Edit</button><button class="btn s d" data-a="ddel" data-id="${x._id}">Del</button></div></div></div>`).join('')}`;
   window._dlist=list;
 };
 const sw3=(k,l,v)=>`<div class="sw"><span>${l}</span><input type="checkbox" data-df="${k}" ${v?'checked':''}></div>`;
 /* ---------- SETTINGS ---------- */
 pages.settings=async()=>{
-  const {sections,values}=await api('/schema');
+  const {sections,values}=await api('/schema');const pg=await api('/pages').catch(()=>[]);const us=ME.role==='owner'?await api('/users').catch(()=>[]):[];window._us=us;
   $('#main').innerHTML=`<div class="row" style="margin-bottom:10px"><button class="btn p" data-a="ssave">Save shob</button><span class="sm mu">Secret field e ••••xxxx thakle purano ta thakbe. Notun likhle replace hobe.</span></div>`+
   sections.map(s=>`<details ${s.id==='fb'||s.id==='ai'?'open':''}><summary><b>${esc(s.title)}</b></summary><div>${s.fields.map(f=>fld(f,values[f.k])).join('')}
    ${s.id==='ai'?'<div class="row" style="margin-top:10px">'+['openrouter','gemini','grok','custom'].map(p=>`<button class="btn s" data-a="aitest" data-p="${p}">Test ${p}</button>`).join('')+'</div><pre id="aitest" class="sm" style="margin-top:8px"></pre>':''}
-   ${s.id==='fb'?'<div class="row" style="margin-top:10px"><button class="btn s" data-a="conn2">Test connection</button></div><pre id="conn2" class="sm" style="margin-top:8px"></pre>':''}</div></details>`).join('');
+   ${s.id==='fb'?'<div class="row" style="margin-top:10px"><button class="btn s" data-a="conn2">Test connection</button></div><pre id="conn2" class="sm" style="margin-top:8px"></pre>':''}</div></details>`).join('')+pagesCard(pg)+(ME.role==='owner'?usersCard(us):'');
 };
+function pagesCard(pg){return `<div class="card"><h3>Facebook pages (ekadhik page)</h3><div class="sm mu">Main page er token upore Facebook section e. Aro page ekhane add korun. Ek webhook URL shob page e kaj kore.</div>${pg.map(p=>`<div class="n"><b>${esc(p.name)}</b> <span class="mu sm">${esc(p.pageId)} ...${esc(p.last4)}</span><div class="row" style="margin-top:6px"><button class="btn s ${p.bot_on?'p':''}" data-a="pgtog" data-id="${esc(p.pageId)}" data-key="bot_on" data-v="${!p.bot_on}">Bot ${p.bot_on?'ON':'OFF'}</button><button class="btn s ${p.messenger_on?'p':''}" data-a="pgtog" data-id="${esc(p.pageId)}" data-key="messenger_on" data-v="${!p.messenger_on}">Messenger ${p.messenger_on?'ON':'OFF'}</button><button class="btn s ${p.comment_on?'p':''}" data-a="pgtog" data-id="${esc(p.pageId)}" data-key="comment_on" data-v="${!p.comment_on}">Comment ${p.comment_on?'ON':'OFF'}</button><button class="btn s" data-a="pgtest" data-id="${esc(p.pageId)}">Test</button><button class="btn s" data-a="pgsub" data-id="${esc(p.pageId)}">Subscribe</button><button class="btn s d" data-a="pgdel" data-id="${esc(p.pageId)}">Remove</button></div></div>`).join('')}<label>Notun page er Page Access Token</label><textarea id="pgtok" spellcheck="false"></textarea><button class="btn p s" data-a="pgadd" style="margin-top:8px">Page add korun</button></div>`}
+const PL=['orders','products','inbox','data','logs','settings','test'];
+function usersCard(us){return `<div class="card"><h3>Admin accounts</h3><div class="sm mu">Tumi owner (username: admin, password Render env e). Staff der shudhu tik deya kaj dekhabe.</div>${us.map(u=>`<div class="n"><b>${esc(u.username)}</b> ${u.active?'':'<span class="badge b-er">off</span>'}<div class="sm mu">${esc((u.perms||[]).join(', ')||'kono permission nai')}</div><div class="row" style="margin-top:6px"><button class="btn s" data-a="uedit" data-u="${esc(u.username)}">Edit</button><button class="btn s d" data-a="udel" data-u="${esc(u.username)}">Delete</button></div></div>`).join('')}<label>Username</label><input id="uf-name"><label>Password (edit e khali rakhle purano thakbe)</label><input id="uf-pw" type="password" autocomplete="new-password"><div class="row" style="margin-top:8px">${PL.map(p=>`<label style="margin:0"><input type="checkbox" class="uf-p" value="${p}" style="width:auto"> ${p}</label>`).join('')}</div><div class="sw"><span>Active</span><input type="checkbox" id="uf-act" checked></div><button class="btn p s" data-a="usave">Save account</button></div>`}
 function fld(f,v){
   const h=f.h?`<div class="sm mu">${esc(f.h)}</div>`:'';
   if(f.t==='bool')return `<div class="sw"><span>${esc(f.l)}</span><input type="checkbox" data-k="${f.k}" ${v?'checked':''}></div>`;
@@ -255,7 +266,7 @@ async function sendTest(){
 /* ---------- ACTIONS ---------- */
 const H={
   tab:b=>go(b.dataset.p),
-  async login(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('#pw').value})});const j=await r.json().catch(()=>({}));if(!r.ok)return toast(j.error||'Login hoyni',true);$('#pw').value='';start()},
+  async login(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('#un').value,password:$('#pw').value})});const j=await r.json().catch(()=>({}));if(!r.ok)return toast(j.error||'Login hoyni',true);$('#pw').value='';start()},
   async logout(){await fetch('/api/logout',{method:'POST'});showLogin()},
   async bell(){const l=await api('/notifications');$('#ovc').innerHTML=`<div class="row sp"><b>Notification</b><button class="btn s" data-a="nread">Shob porlam</button></div>`+(l.map(n=>`<div class="n ${n.read?'':'un'}"><b>${esc(n.title)}</b><div class="sm mu">${esc(n.body||'')}</div></div>`).join('')||'<div class="mu">Kichu nai</div>')+`<button class="btn s" style="margin-top:10px" data-a="ovx">Close</button>`;$('#ov').style.display='block'},
   ovx(){$('#ov').style.display='none'},
@@ -274,6 +285,15 @@ const H={
     else if(x.startsWith('st:')){if(!confirm('Nishchit?'))return;await api(`/orders/${id}/action`,{method:'POST',body:{action:'status',status:x.slice(3)}})}
     else await api(`/orders/${id}/action`,{method:'POST',body:{action:x}});
     toast('Hoyeche');go('orders')},
+  async pgadd(){const t=$('#pgtok').value.trim();if(!t)return toast('Token din',true);const r=await api('/pages',{method:'POST',body:{token:t}});toast('Add hoyeche: '+r.page.name);go('settings')},
+  async pgtog(b){await api('/pages/'+b.dataset.id,{method:'POST',body:{[b.dataset.key]:b.dataset.v==='true'}});go('settings')},
+  async pgdel(b){if(!confirm('Page remove korbo?'))return;await api('/pages/'+b.dataset.id,{method:'DELETE'});go('settings')},
+  async pgtest(b){const r=await api('/pages/'+b.dataset.id+'/test');toast(r.ok?`OK: ${r.name}, ${r.fans||0} followers, webhook ${r.subscribed?'subscribed':'subscribe kora nai'}`:r.error,!r.ok)},
+  async pgsub(b){await api('/pages/'+b.dataset.id+'/subscribe',{method:'POST',body:{}});toast('Subscribe hoyeche')},
+  uedit(b){const u=(window._us||[]).find(x=>x.username===b.dataset.u);if(!u)return;$('#uf-name').value=u.username;$('#uf-pw').value='';document.querySelectorAll('.uf-p').forEach(c=>c.checked=(u.perms||[]).includes(c.value));$('#uf-act').checked=u.active;$('#uf-name').scrollIntoView({behavior:'smooth'})},
+  async usave(){const perms=[...document.querySelectorAll('.uf-p')].filter(c=>c.checked).map(c=>c.value);await api('/users',{method:'POST',body:{username:$('#uf-name').value,password:$('#uf-pw').value,perms,active:$('#uf-act').checked}});toast('Account save hoyeche');go('settings')},
+  async udel(b){if(!confirm('Account delete korbo?'))return;await api('/users/'+encodeURIComponent(b.dataset.u),{method:'DELETE'});go('settings')},
+  async pathao(b){const r=await api('/mod/pathao/ship/'+b.dataset.id,{method:'POST',body:{}});toast('Pathao: '+r.tracking.code);go('orders')},
   async steadfast(b){const r=await api('/mod/steadfast/ship/'+b.dataset.id,{method:'POST',body:{}});toast('Steadfast: '+r.tracking.code);go('orders')},
   pnew(){pf=emptyP();renderPF()},
   pedit(b){pf=JSON.parse(JSON.stringify(window._plist.find(p=>p.code===b.dataset.c)));renderPF()},
@@ -282,6 +302,9 @@ const H={
   async pupload(b){readPF();for(const f of b.files){try{const d=await resize(f);const r=await api('/upload',{method:'POST',body:{dataUrl:d}});pf.images.push(r.url)}catch(e){toast(e.message,true)}}renderPF()},
   async psave(){readPF();const r=await api('/products',{method:'POST',body:pf});toast(r.sameName&&r.sameName.length?'Save hoyeche. Sotorko: ekoi naam er aro product ache ('+r.sameName.join(', ')+'), variant label diye alada korun':'Save hoyeche');pf=null;go('products')},
   async pdel(){if(!confirm('Delete korbo?'))return;await api('/products/'+pf.code,{method:'DELETE'});pf=null;go('products')},
+  async tkst(b){await api('/tickets/'+b.dataset.id,{method:'POST',body:{status:b.dataset.s}});go('inbox')},
+  async tkreply(b){const v=$('#tr-'+b.dataset.id).value.trim();if(!v)return toast('Likhun',true);const r=await api('/tickets/'+b.dataset.id,{method:'POST',body:{reply:v}});toast(r.sent?'Customer ke gelo':'Message jayni (24 ghonta niyom). Call korun',!r.sent);go('inbox')},
+  async tknote(b){const v=$('#tr-'+b.dataset.id).value.trim();if(!v)return toast('Likhun',true);await api('/tickets/'+b.dataset.id,{method:'POST',body:{note:v}});go('inbox')},
   async ares(b){await api(`/attention/${b.dataset.id}/resolve`,{method:'POST',body:{}});go('inbox')},
   async uans(b){const a=$('#ua-'+b.dataset.id).value;await api(`/unknown/${b.dataset.id}/answer`,{method:'POST',body:{answer:a}});toast('AI shikhe nilo');go('inbox')},
   async cust(b){await api('/customers/'+encodeURIComponent(b.dataset.p),{method:'POST',body:{action:b.dataset.x}});toast('Hoyeche');go('inbox')},

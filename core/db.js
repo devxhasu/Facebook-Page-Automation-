@@ -9,6 +9,9 @@ async function connect(uri) {
   const ix = (c, k, o) => db.collection(c).createIndex(k, o).catch((e) => L.warn('db', `index ${c}: ${e.message}`));
   await Promise.all([
     ix('customers', { psid: 1 }, { unique: true }),
+    ix('pages', { pageId: 1 }, { unique: true }),
+    ix('users', { username: 1 }, { unique: true }),
+    ix('tickets', { id: 1 }, { unique: true }),
     ix('products', { code: 1 }, { unique: true }),
     ix('orders', { id: 1 }, { unique: true }),
     ix('orders', { psid: 1 }),

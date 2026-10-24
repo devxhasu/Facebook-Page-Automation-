@@ -26,6 +26,7 @@ const DEFAULTS = {
   comment_delay_min: 8, comment_delay_max: 25, comment_hide_abusive: false,
   tg_on: false, tg_token: '', tg_chat: '', tg_events: '', daily_report: true,
   imgbb_key: '',
+  follow_up_on: true, follow_up_hours: 20, image_match_on: true,
 };
 const SECRETS = new Set(['fb_page_token', 'fb_app_secret', 'openrouter_keys', 'gemini_keys', 'grok_keys', 'custom_url', 'tg_token', 'imgbb_key']);
 let cache = { ...DEFAULTS };

@@ -1,4 +1,5 @@
 const { col, nextId } = require('./db');
+const S = require('./settings');
 let cache = null, at = 0;
 
 const bust = () => { cache = null; };
@@ -68,16 +69,19 @@ async function adjustStock(code, delta) {
   return get(code);
 }
 
-async function search(q, limit = 6) {
+async function search(q, limit = 6, o = {}) {
   const nq = norm(q);
   const tokens = nq.split(' ').filter((t) => t.length > 1);
   const out = [];
   for (const p of await all()) {
     if (!p.active) continue;
+    if (o.maxPrice && p.price > o.maxPrice) continue;
+    if (o.minPrice && p.price < o.minPrice) continue;
+    if (!nq) { if (p.stock > 0) out.push({ p, s: p.price }); continue; } // budget / gift browsing: closest to budget first
     const hay = norm([p.name, p.variant, p.category, p.code, ...(p.aliases || [])].join(' '));
     let s = 0;
-    if (nq && nq.includes(norm(p.code))) s += 100;
-    if (nq && nq.includes(norm(p.name))) s += 3;
+    if (nq.includes(norm(p.code))) s += 100;
+    if (nq.includes(norm(p.name))) s += 3;
     for (const t of tokens) if (hay.includes(t)) s++;
     if (s > 0) out.push({ p, s });
   }
@@ -85,7 +89,7 @@ async function search(q, limit = 6) {
 }
 
 const brief = (p) => ({
-  code: p.code, name: p.name, variant: p.variant || undefined, price: p.price, stock: p.stock,
+  code: p.code, name: p.name, variant: p.variant || undefined, price: p.price, stock: p.stock, low_stock: p.stock <= S.num('low_stock'),
   options: (p.options || []).map((o) => ({ name: o.name, values: o.values })),
   details: p.extra && Object.keys(p.extra).length ? p.extra : undefined,
   description: p.description ? p.description.slice(0, 240) : undefined,

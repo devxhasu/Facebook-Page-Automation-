@@ -82,6 +82,22 @@ async function describeImage(buf, mime) {
   return String(r.message.content || '').trim();
 }
 
+// Does the customer's photo show one of these catalog products? cands: [{code,name,variant,url}]
+async function matchImage(buf, mime, cands) {
+  const content = [
+    { type: 'text', text: 'The first image is a customer photo. Then come candidate catalog products, each with its code. Decide which candidate is the SAME product as in the customer photo. Answer ONLY JSON: {"match":"<code or null>","confidence":<0 to 1>}. Be strict; if unsure use null.' },
+    { type: 'image_url', image_url: { url: `data:${mime || 'image/jpeg'};base64,${buf.toString('base64')}` } },
+  ];
+  for (const c of cands) {
+    content.push({ type: 'text', text: `Candidate ${c.code}: ${c.name}${c.variant ? ' (' + c.variant + ')' : ''}` });
+    content.push({ type: 'image_url', image_url: { url: c.url } });
+  }
+  const r = await chat('vision', [{ role: 'user', content }]);
+  const m = String(r.message.content || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { const j = JSON.parse(m[0]); return j.match && Number(j.confidence) >= 0.6 ? { code: String(j.match).toUpperCase(), confidence: Number(j.confidence) } : null; } catch { return null; }
+}
+
 // Voice -> text using Gemini native API (supports audio)
 async function transcribe(buf, mime) {
   const ks = keysOf('gemini');
@@ -152,4 +168,4 @@ async function test(p) {
   return out;
 }
 
-module.exports = { chat, describeImage, transcribe, backup, status, test, overLimit, usageToday, AllFailed };
+module.exports = { chat, describeImage, matchImage, transcribe, backup, status, test, overLimit, usageToday, AllFailed };
