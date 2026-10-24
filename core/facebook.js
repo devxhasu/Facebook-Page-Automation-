@@ -6,7 +6,7 @@ const als = new AsyncLocalStorage();
 const runWith = (page, fn) => als.run(page || null, fn);
 const curToken = () => { const p = als.getStore(); return String((p && p.token) || S.get('fb_page_token') || '').trim(); };
 const GV = 'v21.0';
-const status = { lastOkAt: 0, lastError: '', lastEventAt: 0, tokenInvalid: false, lastHitAt: 0, sigFailAt: 0, standbyAt: 0, lastSendError: '', lastSendErrorAt: 0, lastSendOkAt: 0, subFields: [], subAt: 0 };
+const status = { lastOkAt: 0, lastError: '', lastEventAt: 0, tokenInvalid: false, lastHitAt: 0, sigFailAt: 0, standbyAt: 0, lastSendError: '', lastSendErrorAt: 0, lastSendOkAt: 0, subFields: [], subAt: 0, lastFeedAt: 0, lastCommentAt: 0 };
 const hooks = { onTokenError: null };
 
 // plain-language reason for the common Facebook send/permission errors (shown in logs + panel)

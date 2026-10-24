@@ -17,13 +17,16 @@ function parseJson(t) {
 }
 
 async function handle(v, page) {
-  if (!v || v.item !== 'comment' || v.verb !== 'add') return;
-  if (!S.get('bot_on') || !S.get('comment_on') || (page && (page.bot_on === false || page.comment_on === false))) return;
+  if (!v || v.item !== 'comment' || v.verb !== 'add') { L.info('comment', `Skip: ${(v && v.item) || '?'} / ${(v && v.verb) || '?'} (shudhu notun comment e reply hoy)`); return; }
+  fb.status.lastCommentAt = Date.now();
+  if (!S.get('bot_on') || !S.get('comment_on') || (page && (page.bot_on === false || page.comment_on === false))) { L.warn('comment', 'Comment ashche kintu Bot ba Comment reply OFF ache (Home > Bot control / Pages), tai reply dei ni'); return; }
   const cid = v.comment_id, from = v.from || {}, text = String(v.message || '').trim();
-  if (!cid || !text) return;
-  if (page && String(from.id) === String(page.pageId)) return;     // our own comment
-  if (v.parent_id && v.post_id && v.parent_id !== v.post_id) return; // reply inside a thread
-  try { await col('comments').insertOne({ _id: cid, createdAt: new Date() }); } catch { return; } // duplicate event
+  if (!cid) { L.warn('comment', 'Comment event e comment_id nai, skip'); return; }
+  if (!text) { L.info('comment', 'Skip: comment e kono lekha nai (shudhu photo/sticker)'); return; }
+  if (page && String(from.id) === String(page.pageId)) { L.info('comment', 'Skip: eta page er nijer comment'); return; }
+  if (v.parent_id && v.post_id && v.parent_id !== v.post_id) { L.info('comment', 'Skip: eta kono comment er reply (shudhu mul comment e reply hoy)'); return; }
+  L.info('comment', `Notun comment: "${text.slice(0, 60)}"`);
+  try { await col('comments').insertOne({ _id: cid, createdAt: new Date() }); } catch { L.info('comment', 'Skip: ei comment age handle kora hoyeche'); return; }
   const key = `${v.post_id}:${from.id}`;
   if (await col('comments').findOne({ key })) { L.info('comment', 'Ei post e ager e reply deya hoyeche, skip'); return; }
   await col('comments').updateOne({ _id: cid }, { $set: { key } });
@@ -52,6 +55,7 @@ private_reply: 2-3 short lines, same language, greeting like a real person, prod
       private_reply: pr ? `Assalamu alaikum. ${pr.name}${pr.variant ? ' (' + pr.variant + ')' : ''} er dam ${O.money(pr.price)}. Kon size/koyta lagbe ji?` : 'Assalamu alaikum. Kon product ta lagbe ji? Naam ba chobi pathaben.' };
   }
   if (!out) { L.warn('comment', 'AI JSON dilo na, skip'); return; }
+  L.info('comment', `AI bujhlo: ${out.intent}`);
   if (out.intent === 'abusive' && S.get('comment_hide_abusive')) { fb.hideComment(cid).then(() => L.ok('comment', 'Abusive comment hide kora hoyeche')).catch((e) => L.warn('comment', e.message)); return; }
   if (['spam', 'abusive', 'other'].includes(out.intent) || (!out.public_reply && !out.private_reply)) { L.info('comment', `Skip (${out.intent})`); return; }
 

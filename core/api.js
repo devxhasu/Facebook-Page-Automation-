@@ -23,7 +23,7 @@ const BACKUP = ['settings', 'products', 'customers', 'orders', 'payments', 'kb',
 
 // permission per area (staff accounts only see what the owner allowed)
 const PERM = [[/^\/orders/, 'orders'], [/^\/(products|upload)/, 'products'], [/^\/(customers|attention|unknown|tickets)/, 'inbox'], [/^\/c\//, 'data'], [/^\/logs/, 'logs'],
-  [/^\/(schema|settings|connection|ai|modules|pages)/, 'settings'], [/^\/test-chat/, 'test'], [/^\/(system|backup|restore|users)/, 'owner']];
+  [/^\/(schema|settings|connection|comment-check|ai|modules|pages)/, 'settings'], [/^\/test-chat/, 'test'], [/^\/(system|backup|restore|users)/, 'owner']];
 r.use((q, s, next) => {
   for (const [re, p] of PERM) if (re.test(q.path)) return auth.can(q.user, p) ? next() : s.status(403).json({ error: 'Ei kaj er permission nai' });
   next();
@@ -92,6 +92,33 @@ r.get('/connection', wrap(async (q, s) => {
   }
   s.json(info);
 }));
+// one-click diagnosis for "comment e reply nai"
+r.get('/comment-check', wrap(async (q, s) => {
+  const out = [];
+  const add = (ok, name, msg) => out.push({ ok, name, msg });
+  add(!!S.get('fb_page_token'), 'Page token', S.get('fb_page_token') ? 'Ache' : 'Token nai: Settings > Facebook');
+  add(!!S.get('bot_on') && !!S.get('comment_on'), 'Bot + Comment reply switch', S.get('bot_on') && S.get('comment_on') ? 'ON' : 'OFF: Home > Bot control e on korun');
+  const keys = (await AI.status()).providers.reduce((a, p) => a + p.keys.length, 0);
+  add(keys > 0, 'AI key', keys ? keys + ' ta' : 'Nai (tobe simple reply jabe, kintu AI key dile bhalo)');
+  let pageOk = false;
+  try { const p = await fb.pageInfo(); pageOk = true; add(true, 'Token ta Page token', `Page: ${p.name}`); comments.setPageId(p.id); }
+  catch (e) { add(false, 'Token ta Page token', e.message + ' (User token hole token abar Save korun)'); }
+  if (pageOk) {
+    try {
+      const have = new Set(((await fb.subscribed()).data || []).flatMap((a) => a.subscribed_fields || []));
+      add(have.has('feed'), 'Webhook "feed" subscribe', have.has('feed') ? 'Subscribed' : 'Subscribe nai: "Webhook subscribe" chapun');
+      add(have.has('messages'), 'Webhook "messages" subscribe', have.has('messages') ? 'Subscribed' : 'Subscribe nai');
+    } catch (e) { add(false, 'Webhook subscribe check', e.message); }
+    try { await fb.graph('me/feed?limit=1'); add(true, 'Post/comment porar permission', 'OK (pages_read_engagement)'); }
+    catch (e) { add(false, 'Post/comment porar permission', e.message + ' | pages_read_engagement permission lagbe'); }
+    try { const t = await fb.debugToken(); if (t) { const sc = t.scopes || []; for (const p of ['pages_read_engagement', 'pages_manage_engagement', 'pages_messaging']) add(sc.includes(p), 'Permission ' + p, sc.includes(p) ? 'Ache' : 'Token e nai (Facebook App > Permissions, tarpor notun Page token nin)'); } } catch {}
+  }
+  add(!!fb.status.lastHitAt, 'Facebook theke kono webhook ashche', fb.status.lastHitAt ? 'Last: ' + Math.round((Date.now() - fb.status.lastHitAt) / 1000) + 's age' : 'Server start er por ekbaro ashe nai: Facebook Developer > Webhooks > Callback URL/Verify Token check korun');
+  add(!!fb.status.lastFeedAt, 'Facebook comment ("feed") event pathiyeche', fb.status.lastFeedAt ? 'Last: ' + Math.round((Date.now() - fb.status.lastFeedAt) / 1000) + 's age' : 'Ekhono ekta-o ashe nai. Page e ekta comment korun, tarpor abar check korun. Tao na ashle Facebook Developer > Webhooks > Page > feed Subscribe + App Live mode lagbe');
+  const bad = out.find((x) => !x.ok);
+  s.json({ ok: !bad, first_problem: bad ? `${bad.name}: ${bad.msg}` : 'Shob thik. Comment korle log e "Notun comment" ashbe', checks: out });
+}));
+
 r.post('/connection/subscribe', wrap(async (q, s) => {
   const pgs = await fb.pagesFromUserToken(S.get('fb_page_token')).catch(() => []);
   if (pgs.length) { await S.save({ fb_page_token: pgs[0].access_token }); L.ok('facebook', 'User token chhilo, Page Token e bodlano holo: ' + pgs[0].name); }

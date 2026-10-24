@@ -156,7 +156,7 @@ pages.dash=async()=>{
     <div class="stat"><b>${d.tickets||0}</b><span>Open ticket</span></div>
   </div><div style="height:12px"></div>
   <div class="card"><h3>Facebook connection</h3><div id="conn" class="sm mu">Last event: ${d.fb.lastEventAt?ago(d.fb.lastEventAt)+' age':'ekhono kono event ashe nai'}</div>
-    <div class="row" style="margin-top:8px"><button class="btn s p" data-a="conn">Test connection</button><button class="btn s" data-a="subscribe">Webhook subscribe</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn s p" data-a="conn">Test connection</button><button class="btn s" data-a="subscribe">Webhook subscribe</button><button class="btn s" data-a="ccheck">Comment check</button></div>
     <label>Webhook URL (Facebook Developer e dien)</label><input readonly value="${esc(d.webhook.url)}" onclick="this.select()">
     <label>Verify Token</label><input readonly value="${esc(d.webhook.verify)}" onclick="this.select()"></div>
   <div class="card"><h3>AI status</h3>${d.ai.providers.map(p=>`<div class="sm" style="margin:6px 0"><b>${esc(p.name)}</b> <span class="mu">${esc(p.model)}</span> ${p.on?'':'<span class="badge">off</span>'}<br>${p.keys.length?p.keys.map(k=>`<span class="badge ${k.ok===true?'b-ok':k.ok===false?'b-er':''}" title="${esc(k.err||'')}">${esc(k.id)} ...${esc(k.last4)} ${k.ok===true?'ok':k.ok===false?'fail':'untested'}</span>`).join(' '):'<span class="mu">key nai</span>'}</div>`).join('')}
@@ -301,6 +301,7 @@ const H={
   async toggle(b){await api('/settings',{method:'POST',body:{[b.dataset.k]:b.checked}});toast('Save hoyeche');poll()},
   async conn(){const r=await api('/connection');$('#conn').innerHTML=r.ok?`<b style="color:var(--ok)">Connected</b>: ${esc(r.page.name)} (${esc(r.page.category||'')}) | ${r.page.fans||0} followers${r.token?` | Token: ${r.token.valid?'valid':'INVALID'}, meyad ${esc(r.token.expires)}`:''}<br>Webhook: ${(r.subscribed||[]).length?'subscribed ('+esc(((r.subscribed[0]||{}).fields||[]).join(', '))+')':'<b style="color:var(--wa)">subscribe kora nai</b>'}`:`<b style="color:var(--er)">${esc(r.error||'Token nai')}</b>`},
   async conn2(){const r=await api('/connection');$('#conn2').textContent=JSON.stringify(r,null,1)},
+  async ccheck(){const r=await api('/comment-check');$('#conn').innerHTML=`<div style="margin:6px 0"><b style="color:var(--${r.ok?'ok':'er'})">${esc(r.first_problem)}</b></div>`+r.checks.map(x=>`<div class="chk"><span class="dot ${x.ok?'g':'r'}"></span><div><b>${esc(x.name)}</b><div class="sm mu">${esc(x.msg)}</div></div></div>`).join('')},
   async subscribe(){await api('/connection/subscribe',{method:'POST',body:{}});toast('Subscribe hoyeche')},
   async soft(){await api('/system/soft-restart',{method:'POST',body:{}});toast('Soft restart hoyeche')},
   async hard(){if(!confirm('Server restart korbo? 30-60 sec lagte pare.'))return;await api('/system/restart',{method:'POST',body:{}});toast('Restart hocche...')},

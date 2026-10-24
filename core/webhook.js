@@ -50,6 +50,7 @@ router.post('/webhook', (req, res) => {
       for (const ev of en.messaging || []) onMessaging(ev, page);
       for (const ch of en.changes || []) {
         L.info('webhook', `Feed event: ${ch.field}/${(ch.value && ch.value.item) || ''}/${(ch.value && ch.value.verb) || ''}`);
+        if (ch.field === 'feed') fb.status.lastFeedAt = Date.now();
         if (ch.field === 'feed') fb.runWith(page, () => comments.handle(ch.value, page)).catch((e) => L.error('comment', e.message, e));
       }
     }).catch((e) => L.error('webhook', e.message, e));
