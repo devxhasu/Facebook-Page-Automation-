@@ -128,7 +128,10 @@ async function transcribe(buf, mime) {
 // Text-only backup API (no tools, no images, no personal data)
 async function backup(text) {
   if (!S.get('custom_on') || !S.get('custom_url')) return null;
-  const clean = String(text || '').replace(/\d{8,}/g, '[number]').slice(0, 400);
+  let cat = '';
+  try { cat = (await require('./products').all()).filter((p) => p.active).slice(0, 12).map((p) => `${p.name}${p.variant ? ' ' + p.variant : ''} ${p.price}tk`).join(', '); } catch {}
+  const guide = `Tumi "${S.get('page_name') || 'amader shop'}" er Bangladeshi online shop assistant. Customer er moto Banglish ba Bangla e, 1-2 chhoto line e, namro bhabe uttor dao. Onno website/shop er nam bolo na, Hindi/English e jabe na. ${cat ? 'Amader product: ' + cat + '. ' : ''}Product, size, address, phone chaile ekta ekta kore jiggesh koro. Customer: `;
+  const clean = (guide + String(text || '').replace(/\d{8,}/g, '[number]')).slice(0, 1200);
   try {
     const url = S.get('custom_url').replace('{message}', encodeURIComponent(clean));
     const r = await fetch(url, { signal: AbortSignal.timeout(25000) });

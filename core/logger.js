@@ -31,5 +31,6 @@ module.exports = {
   subscribe: (fn) => { subs.add(fn); return () => subs.delete(fn); },
   recent: () => ring.slice(),
   setSink: (c) => { sink = c; },
+  clear: async () => { ring.length = 0; if (sink) await sink.deleteMany({}); },
   mask,
 };

@@ -205,16 +205,16 @@ pages.inbox=async()=>{
 /* ---------- LOGS ---------- */
 const ICON={message:'📩',reply:'📤',ai:'🤖',tool:'🛠️',order:'🛒',comment:'💬',webhook:'🔗',voice:'🎤',facebook:'📘',boot:'🚀',db:'🗄️',notify:'🔔',telegram:'✈️',upload:'🖼️',steadfast:'🚚',system:'⚙️',auth:'🔐',crash:'💥',settings:'💾',api:'🧩',agent:'🧠',module:'📦'};
 const LI={ok:'✅',warn:'⚠️',error:'❌',info:'•'};
-let lfil='all',lpause=false,lq='';
+let lfil='all',lpause=false,lq='';const lseen=new Set();const lkey=e=>e.t+'|'+e.type+'|'+e.msg;
 const lrow=e=>{const t=new Date(e.t).toLocaleTimeString('en-GB');return `<div class="ll ${e.level}" data-t="${esc(e.type)}" data-l="${e.level}"><span class="t">${t}</span> ${LI[e.level]||''} ${ICON[e.type]||''} <b>${esc(e.type)}</b> ${esc(e.msg)}${e.meta?`<div class="mu" style="white-space:pre-wrap">${esc(String(e.meta).slice(0,700))}</div>`:''}</div>`};
 function lapply(){document.querySelectorAll('#log .ll').forEach(r=>{const okf=lfil==='all'||r.dataset.l===lfil||r.dataset.t===lfil;const okq=!lq||r.textContent.toLowerCase().includes(lq);r.hidden=!(okf&&okq)})}
 pages.logs=async()=>{
   const old=await api('/logs?limit=200');
-  $('#main').innerHTML=`<div class="chips">${['all','error','warn','ok','message','reply','ai','order','comment','voice'].map(f=>`<span class="chip ${lfil===f?'on':''}" data-a="lfil" data-f="${f}">${f}</span>`).join('')}<span class="chip" data-a="lpause" id="lp">${lpause?'Resume':'Pause'}</span><span class="chip" data-a="lcopy">Copy</span><span class="chip" data-a="lclear">Clear</span></div><input id="lq" placeholder="Search..." value="${esc(lq)}" style="margin-bottom:8px"><div class="card" style="padding:0"><div id="log" style="max-height:68vh;overflow:auto">${old.map(lrow).join('')}</div></div>`;
+  $('#main').innerHTML=`<div class="chips">${['all','error','warn','ok','message','reply','ai','order','comment','voice'].map(f=>`<span class="chip ${lfil===f?'on':''}" data-a="lfil" data-f="${f}">${f}</span>`).join('')}<span class="chip" data-a="lpause" id="lp">${lpause?'Resume':'Pause'}</span><span class="chip" data-a="lcopy">Copy</span><span class="chip" data-a="lclear">Clear</span></div><input id="lq" placeholder="Search..." value="${esc(lq)}" style="margin-bottom:8px"><div class="card" style="padding:0"><div id="log" style="max-height:68vh;overflow:auto">${old.map(e=>{lseen.add(lkey(e));return lrow(e)}).join('')}</div></div>`;
   const box=$('#log');box.scrollTop=box.scrollHeight;lapply();
   $('#lq').oninput=e=>{lq=e.target.value.toLowerCase();lapply()};
   es=new EventSource('/api/logs/stream');
-  es.onmessage=m=>{if(lpause)return;const e=JSON.parse(m.data);const b=$('#log');if(!b)return;const near=b.scrollHeight-b.scrollTop-b.clientHeight<80;b.insertAdjacentHTML('beforeend',lrow(e));while(b.children.length>500)b.firstChild.remove();lapply();if(near)b.scrollTop=b.scrollHeight};
+  es.onmessage=m=>{if(lpause)return;const e=JSON.parse(m.data);const b=$('#log');if(!b)return;if(lseen.has(lkey(e)))return;lseen.add(lkey(e));const near=b.scrollHeight-b.scrollTop-b.clientHeight<80;b.insertAdjacentHTML('beforeend',lrow(e));while(b.children.length>500)b.firstChild.remove();lapply();if(near)b.scrollTop=b.scrollHeight};
 };
 /* ---------- DATA (knowledge, coupons, post links) ---------- */
 const DATA={kb:{t:'Knowledge (AI eta dekhe uttor dey)',f:[['title','Title / proshno'],['content','Uttor / details','area'],['active','Active','bool']]},
@@ -314,7 +314,7 @@ const H={
   async cust(b){await api('/customers/'+encodeURIComponent(b.dataset.p),{method:'POST',body:{action:b.dataset.x}});toast('Hoyeche');go('inbox')},
   lfil(b){lfil=b.dataset.f;document.querySelectorAll('[data-a=lfil]').forEach(c=>c.classList.toggle('on',c.dataset.f===lfil));lapply()},
   lpause(b){lpause=!lpause;b.textContent=lpause?'Resume':'Pause'},
-  lclear(){$('#log').innerHTML=''},
+  async lclear(){await api('/logs',{method:'DELETE'});$('#log').innerHTML='';lseen.clear();toast('Log clear hoyeche')},
   async lcopy(){const txt=[...document.querySelectorAll('#log .ll')].filter(r=>!r.hidden).map(r=>r.innerText.replace(/\n+/g,' | ').trim()).join('\n');
     try{await navigator.clipboard.writeText(txt)}catch{const t=document.createElement('textarea');t.value=txt;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}
     toast('Log copy hoyeche ('+txt.split('\n').length+' line)')},

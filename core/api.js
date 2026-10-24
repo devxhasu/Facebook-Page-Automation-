@@ -183,6 +183,7 @@ r.get('/logs', wrap(async (q, s) => {
   const rows = await col('logs').find({}).sort({ t: -1 }).limit(lim).toArray();
   s.json(rows.reverse().map((x) => ({ t: x.t, type: x.type, level: x.level, msg: x.msg, meta: x.meta })));
 }));
+r.delete('/logs', wrap(async (q, s) => { await L.clear(); s.json({ ok: true }); }));
 r.get('/logs/stream', (q, s) => {
   s.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   s.flushHeaders();
