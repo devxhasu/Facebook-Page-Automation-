@@ -1,169 +1,40 @@
-# AI Sales Agent for Facebook Page
+# FB Shop Agent
 
-**Full modular system** – Facebook Messenger + Comment Auto Reply + Order Management + Multi AI Provider + Full Control Web Panel.
+Facebook page er jonno AI sales agent: Messenger + comment auto reply, order, payment verify, admin web panel.
 
-কোনো ফিচার বাদ দেওয়া হয়নি। প্রজেক্টটা **মডুলার** করে বানানো হয়েছে যাতে পরে নতুন ফিচার সহজে যোগ করা যায়।
+## 1. MongoDB (free)
+1. MongoDB Atlas e free cluster, ekta database user banan.
+2. Network Access > Add IP > `0.0.0.0/0` (Render er IP change hoy).
+3. Connection string niye shesh e database naam boshan:
+   `mongodb+srv://USER:PASS@cluster0.xxxx.mongodb.net/fbshop?retryWrites=true&w=majority`
 
----
+## 2. Render
+1. Ei folder GitHub e push korun. Render > New > Web Service > repo select.
+2. Build command `npm install`, Start command `npm start`.
+3. Environment e shudhu ei 3 ta:
+   - `ADMIN_PASSWORD` : panel er password
+   - `MONGODB_URI`    : upore er string
+   - `SECRET_KEY`     : boro random lekha (token encrypt hoy). Pore bodlale save kora key gulo abar dite hobe.
+4. Baki shob (Facebook token, AI key, payment number...) panel theke.
 
-## Features (সবগুলো)
+## 3. UptimeRobot
+HTTP monitor: `https://APP.onrender.com/health`, 5 minute por por.
 
-### AI Sales Agent
-- মানুষের মতো ছোট ও স্বাভাবিক কথা (বাংলা / Banglish)
-- অর্ডার ফ্লোতে মাঝপথে অন্য প্রশ্ন হ্যান্ডেল করে আবার অর্ডারে ফেরে
-- জানা তথ্য আর দ্বিতীয়বার চায় না
-- এক মেসেজে অনেক তথ্য একসাথে ধরে
-- একই নামের প্রোডাক্টে গেস করে না (ইউনিক কোড + ভ্যারিয়েন্ট)
-- Typing delay + short messages
-- Human Takeover সাপোর্ট
+## 4. Panel setup (https://APP.onrender.com)
+1. Login > Settings > **AI providers**: OpenRouter key boshan (ek line e ekta key, ekadhik dile auto rotate). Test button chapun.
+2. Settings > **Payment**: bKash/Nagad number, on/off switch. **Delivery**: charge.
+3. Products e product add (chobi upload shoho). Test chat e AI er shathe kotha bole dekhun.
 
-### Payment & Fake Order Protection
-- COD / Delivery Advance / Full Advance (Panel থেকে On/Off)
-- AI নিজে Confirm করে না
-- TrxID + Sender + Amount নিয়ে Verify Request
-- শুধু Admin “Payment Received” দিলে Confirm
-- Phone format check, daily limit, blacklist, new customer = advance
+## 5. Facebook
+1. developers.facebook.com > App > Messenger > Webhooks: Callback URL = panel Home e deya Webhook URL, Verify Token = panel er token.
+2. Webhook fields: `messages`, `messaging_postbacks`, `feed`.
+3. Page Access Token generate kore Settings > Facebook e boshan. Home > **Test connection**.
+4. Permission lagbe: pages_messaging, pages_manage_metadata, pages_read_engagement, pages_manage_engagement. Live korte Facebook App Review lagte pare (nam ar niyom Facebook bodlate pare).
+5. Comment er jonno kon post e kon product: Data > post_links.
 
-### Comment System
-- কমেন্ট বুঝে পাবলিক ছোট রিপ্লাই + ইনবক্সে ডিটেইলস
-- পোস্ট → প্রোডাক্ট লিংক
-- স্প্যাম/ইমোজি স্কিপ
+## Notun feature (module)
+`modules/<naam>/index.js` banan: `{ title, version, fields:[...settings], init(ctx){ ctx.router..., ctx.agent.registerTool(...), ctx.bus.on('order:status',...) } }`.
+`modules/steadfast` dekhe nin. Core file e hat dite hoy na. Render e module deploy hoy git push diye.
 
-### Panel (Full Control)
-- Dashboard, Orders, Products, Connections
-- Unlimited Knowledge Base
-- Payment Numbers (আনলিমিটেড)
-- AI Providers (OpenRouter → Gemini → Grok → Backup)
-- Live Logs (রং কোডসহ)
-- Needs Attention
-- Settings সব DB তে (env এ শুধু ৩টা)
-
-### Technical
-- Node.js + Express
-- MongoDB (Atlas recommended)
-- Official Facebook Graph API only
-- Modular services (AI / Facebook / Order / Product / Log)
-- Easy to extend
-
----
-
-## Quick Start
-
-### 1. Install
-```bash
-cd facebook-ai-sales-agent
-npm install
-```
-
-### 2. Environment
-```bash
-cp .env.example .env
-```
-এডিট করো:
-```
-ADMIN_PASSWORD=your_strong_password
-DATABASE_URL=mongodb+srv://...   # MongoDB Atlas free
-SECRET_KEY=long_random_string_32chars_minimum
-```
-
-### 3. Run
-```bash
-npm start
-# or
-npm run dev
-```
-
-Panel: `http://localhost:3000`  
-Login: `admin` + তোমার `ADMIN_PASSWORD`
-
-### 4. Facebook Setup
-1. [developers.facebook.com](https://developers.facebook.com) → App তৈরি
-2. Messenger + Webhooks যোগ করো
-3. Webhook URL: `https://your-domain.com/api/webhook`
-4. Verify Token: `ai_sales_agent_verify_token_2024`
-5. Page Access Token জেনারেট করে Panel → Connections এ পেস্ট করো
-
-### 5. AI Providers
-Panel → AI Providers অথবা সরাসরি MongoDB তে `aiproviders` কালেকশনে অ্যাড করো।
-
-উদাহরণ (OpenRouter):
-```js
-{
-  type: "text",
-  name: "OpenRouter",
-  model: "openai/gpt-4o-mini",
-  apiKeys: [{ key: "sk-or-...", label: "main", isActive: true }],
-  isActive: true,
-  sortOrder: 1
-}
-```
-
----
-
-## Project Structure (Modular)
-
-```
-src/
-├── config/          → app config
-├── models/          → all MongoDB schemas
-├── routes/          → API endpoints
-├── services/
-│   ├── ai/          → ProviderManager + SalesAgent
-│   ├── facebook/    → Messenger & Comment API
-│   ├── order/       → (extendable)
-│   ├── product/
-│   ├── payment/
-│   ├── notification/
-│   └── log/
-├── middleware/
-├── utils/
-└── public/          → Admin Panel (HTML/CSS/JS)
-```
-
-নতুন ফিচার যোগ করতে চাইলে শুধু সংশ্লিষ্ট `services/` ফোল্ডারে নতুন মডিউল বানিয়ে `routes` এ কানেক্ট করো। পুরো প্রজেক্ট এডিট করতে হবে না।
-
----
-
-## Deploy (Render / Railway / VPS)
-
-1. MongoDB Atlas ফ্রি ক্লাস্টার বানাও
-2. Env ভেরিয়েবল সেট করো
-3. Start command: `node src/server.js`
-4. UptimeRobot দিয়ে `/health` পিং দাও (১৫ মিনিট স্লিপ এড়াতে)
-
----
-
-## Important Notes
-
-- **কোনো Appstate / Cookie ব্যবহার করা হয়নি** – শুধু Official Page Access Token
-- AI কখনো নিজে অর্ডার Confirm করে না
-- Backup API তে নাম/ফোন/ঠিকানা পাঠানো হয় না
-- Live Logs এ API Key মাস্কড থাকে
-- সব কনফিগ Panel / DB তে – কোডে হার্ডকোড নেই
-
----
-
-## Next Easy Extensions
-
-- Telegram notification module
-- Steadfast / Pathao tracking
-- Voice reply (TTS)
-- Advanced bargain limit
-- Coupon auto apply
-- Multi-language system prompt
-
-সবকিছু মডুলার রাখা হয়েছে যাতে এগুলো আলাদা করে যোগ করা যায়।
-
-## Extra Improvements Included
-
-- Order status by keyword **and** order ID (`#1042 koi?`)
-- Budget mode (“1000 tk er moddhe”)
-- Thank-you auto closing
-- Risk-aware payment (new/risky customer → advance)
-- Soft upsell hint in system prompt
-- Incomplete address detection rule
-- Low stock + Telegram notification module
-- Status change auto message to customer
-- Daily report helper
-- Simple response cache utility
-- Modular notification service
+## Error dekha
+Render > Logs ar panel > Logs, duto jaygay ekoi line. Token/API key log e mask hoye ashe.
