@@ -57,21 +57,35 @@ r.get('/schema', (q, s) => {
 r.post('/settings', wrap(async (q, s) => {
   const before = S.get('fb_page_token');
   const nt = String((q.body || {}).fb_page_token || '').trim();
+  const result = { ok: true };
   if (nt && !nt.startsWith('••••')) {
     q.body.fb_page_token = nt;
     try {
-      const pgs = await fb.pagesFromUserToken(nt);
+      let tok = nt;
+      const aid = String((q.body || {}).fb_app_id || S.get('fb_app_id') || '').trim();
+      let asec = String((q.body || {}).fb_app_secret || '').trim();
+      if (!asec || asec.startsWith('••••')) asec = S.get('fb_app_secret');
+      if (aid && asec) {
+        try { tok = await fb.longLived(nt, aid, asec); L.ok('facebook', 'Token auto extend hoyeche (long-lived)'); }
+        catch (e) { L.warn('facebook', 'Auto extend hoyni (App ID/Secret thik ache?): ' + e.message); }
+      } else L.warn('facebook', 'App ID + App Secret na thakle token auto extend hoy na. Settings > Facebook e duto-i din, tahole token expire hobe na');
+      const pgs = await fb.pagesFromUserToken(tok);
       if (pgs.length) { // user token pasted: switch to the real Page token(s)
         q.body.fb_page_token = pgs[0].access_token;
         for (const extra of pgs.slice(1)) await Pages.add(extra.access_token).catch(() => {});
+        result.token = { converted: true, page: pgs[0].name, extra: pgs.length - 1 };
         L.ok('facebook', `User token chhilo; "${pgs[0].name}" page er Page Token auto boshano holo${pgs.length > 1 ? ` (aro ${pgs.length - 1} ta page Pages e add)` : ''}`);
       }
     } catch (e) { L.warn('facebook', 'Token check hoyni: ' + e.message); }
   }
   await S.save(q.body || {});
   L.ok('settings', 'Setting save hoyeche');
-  if (S.get('fb_page_token') && S.get('fb_page_token') !== before) fb.ensureSubscribed(null, 'Main page').catch(() => {});
-  s.json({ ok: true });
+  if (S.get('fb_page_token') && S.get('fb_page_token') !== before) {
+    fb.ensureSubscribed(null, 'Main page').catch(() => {});
+    try { const p = await fb.pageInfo(); result.token = { ...(result.token || {}), page: p.name, valid: true }; }
+    catch (e) { result.token = { ...(result.token || {}), valid: false, error: e.message }; }
+  }
+  s.json(result);
 }));
 
 // ----- facebook connection -----

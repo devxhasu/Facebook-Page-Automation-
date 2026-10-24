@@ -74,6 +74,16 @@ async function pagesFromUserToken(token) {
   return (j.data || []).filter((p) => p.access_token);
 }
 
+// short-lived User token (1-2h) -> long-lived (60 days). Page tokens made from a long-lived token never expire.
+async function longLived(token, appId, secret) {
+  if (!token || !appId || !secret) return '';
+  const u = `https://graph.facebook.com/${GV}/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(secret)}&fb_exchange_token=${encodeURIComponent(token)}`;
+  const r = await fetch(u, { signal: AbortSignal.timeout(20000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) throw new Error((j.error && j.error.message) || 'Token extend hoyni');
+  return j.access_token;
+}
+
 // make sure the page is subscribed to ALL fields we need (messages + postbacks + comments feed); idempotent, never throws
 const NEED = ['messages', 'messaging_postbacks', 'feed'];
 async function ensureSubscribed(page, label) {
@@ -96,4 +106,4 @@ async function debugToken() {
   return j.data || null;
 }
 
-module.exports = { pagesFromUserToken, ensureSubscribed, runWith, status, hooks, graph, text, image, carousel, typing, seen, privateReply, replyComment, hideComment, pageInfo, userName, subscribe, subscribed, debugToken };
+module.exports = { longLived, pagesFromUserToken, ensureSubscribed, runWith, status, hooks, graph, text, image, carousel, typing, seen, privateReply, replyComment, hideComment, pageInfo, userName, subscribe, subscribed, debugToken };

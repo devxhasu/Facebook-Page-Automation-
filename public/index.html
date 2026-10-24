@@ -347,7 +347,9 @@ const H={
   dcancel(){dataEdit=null;go('data')},
   async dsave(){const body={};if(dataEdit)body._id=dataEdit._id;document.querySelectorAll('[data-df]').forEach(e=>{body[e.dataset.df]=e.type==='checkbox'?e.checked:e.value});await api('/c/'+dataTab,{method:'POST',body});dataEdit=null;toast('Save hoyeche');go('data')},
   async ddel(b){if(!confirm('Delete?'))return;await api(`/c/${dataTab}/${b.dataset.id}`,{method:'DELETE'});go('data')},
-  async ssave(){const body={};document.querySelectorAll('[data-k]').forEach(e=>{if(e.dataset.a==='toggle')return;body[e.dataset.k]=e.type==='checkbox'?e.checked:e.value});await api('/settings',{method:'POST',body});toast('Shob save hoyeche')},
+  async ssave(){const body={};document.querySelectorAll('[data-k]').forEach(e=>{if(e.dataset.a==='toggle')return;body[e.dataset.k]=e.type==='checkbox'?e.checked:e.value});const r=await api('/settings',{method:'POST',body});
+    if(r.token){r.token.valid?toast('Save hoyeche. Page: '+r.token.page+(r.token.converted?' (User token theke Page token boshano holo)':'')):toast('Save hoyeche kintu token e shomossha: '+(r.token.error||''),true)}else toast('Shob save hoyeche');
+    go('settings')},
   async aitest(b){$('#aitest').textContent='Testing '+b.dataset.p+'...';const r=await api('/ai/test',{method:'POST',body:{provider:b.dataset.p}});$('#aitest').textContent=r.results.map(x=>`${x.ok?'OK  ':'FAIL'} ${x.id} ${x.ok?(x.ms?x.ms+'ms':'')+' '+(x.text||''):x.err}`).join('\n')},
   tsend(){sendTest()},
   async treset(){await api('/test-chat/reset',{method:'POST',body:{}});sess=Math.random().toString(36).slice(2,9);go('test')},
