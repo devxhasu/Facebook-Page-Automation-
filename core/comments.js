@@ -28,8 +28,7 @@ async function handle(v, page) {
   L.info('comment', `Notun comment: "${text.slice(0, 60)}"`);
   try { await col('comments').insertOne({ _id: cid, createdAt: new Date() }); } catch { L.info('comment', 'Skip: ei comment age handle kora hoyeche'); return; }
   const key = `${v.post_id}:${from.id}`;
-  if (await col('comments').findOne({ key })) { L.info('comment', 'Ei post e ager e reply deya hoyeche, skip'); return; }
-  await col('comments').updateOne({ _id: cid }, { $set: { key } });
+  if (await col('comments').findOne({ key, replied: true, createdAt: { $gt: new Date(Date.now() - 2 * 3600e3) } })) { L.info('comment', 'Skip: ei user ke ei post e 2 ghontar moddhe reply deya hoyeche'); return; }
 
   let products = [];
   const link = await col('post_links').findOne({ post_id: String(v.post_id) });
@@ -38,7 +37,7 @@ async function handle(v, page) {
 
   const priceRule = S.get('comment_price_public') ? 'You may mention the price in the public reply.' : 'Do NOT mention any price in the public reply.';
   const sys = `You write replies to Facebook post comments for the shop "${(page && page.name) || S.get('page_name') || 'our shop'}" in Bangladesh. Output ONLY JSON: {"intent":"price|order|info|spam|abusive|other","public_reply":"","private_reply":""}.
-intent "other" = only emoji, tag, like or unrelated: leave both replies empty. spam/abusive: leave both empty.
+intent "other" = ONLY emoji, a lone tag/mention, or clearly unrelated chat: leave both replies empty. Any real word or question ("ok", "nice", "price", "ache?", "details", "test") is NOT other: treat it as info/price and reply. spam/abusive: leave both empty.
 public_reply: one short human line (max 12 words), vary the wording, same language as the comment (Bangla, Banglish or English), say details are sent in inbox. ${priceRule} No hashtags.
 private_reply: 2-3 short lines, same language, greeting like a real person, product name and price and available options taken ONLY from PRODUCT DATA, then ask what size/quantity they want. If PRODUCT DATA is empty, ask which product they mean. Never invent anything. Almost no emoji.`;
   let out;
@@ -57,7 +56,13 @@ private_reply: 2-3 short lines, same language, greeting like a real person, prod
   if (!out) { L.warn('comment', 'AI JSON dilo na, skip'); return; }
   L.info('comment', `AI bujhlo: ${out.intent}`);
   if (out.intent === 'abusive' && S.get('comment_hide_abusive')) { fb.hideComment(cid).then(() => L.ok('comment', 'Abusive comment hide kora hoyeche')).catch((e) => L.warn('comment', e.message)); return; }
-  if (['spam', 'abusive', 'other'].includes(out.intent) || (!out.public_reply && !out.private_reply)) { L.info('comment', `Skip (${out.intent})`); return; }
+  // a comment with real words is a possible customer: never ignore it silently
+  if (out.intent === 'other' && /[\p{L}\p{N}]{2,}/u.test(text) && !out.public_reply && !out.private_reply) {
+    const pr = products[0];
+    out = { intent: 'info', public_reply: 'Details inbox e pathiyechi ji', private_reply: pr ? `Assalamu alaikum. ${pr.name}${pr.variant ? ' (' + pr.variant + ')' : ''} er dam ${O.money(pr.price)}. Kon size/koyta lagbe ji?` : 'Assalamu alaikum. Kon product ta lagbe ji? Naam ba chobi pathaben.' };
+  }
+  if (['spam', 'abusive'].includes(out.intent) || (!out.public_reply && !out.private_reply)) { L.info('comment', `Skip (${out.intent}): ${text.slice(0, 40)}`); return; }
+  await col('comments').updateOne({ _id: cid }, { $set: { key, replied: true } });
 
   const min = Math.max(0, S.num('comment_delay_min')), max = Math.max(min, S.num('comment_delay_max'));
   const wait = (min + Math.random() * (max - min)) * 1000;

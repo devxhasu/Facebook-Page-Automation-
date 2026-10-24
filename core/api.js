@@ -130,7 +130,7 @@ r.get('/comment-check', wrap(async (q, s) => {
   const cp = require('./commentpoll').state;
   add(!!S.get('comment_poll_on') && !cp.lastError, 'Comment polling (webhook er backup)', !S.get('comment_poll_on') ? 'OFF: Settings > Comment reply e on korun' : cp.lastError ? 'Error: ' + cp.lastError : cp.lastRunAt ? `Cholche, last ${Math.round((Date.now() - cp.lastRunAt) / 1000)}s age, ${cp.found} ta notun comment peyechhe` : 'Prothom run 1 minute er moddhe');
   add(!!fb.status.lastHitAt, 'Facebook theke kono webhook ashche', fb.status.lastHitAt ? 'Last: ' + Math.round((Date.now() - fb.status.lastHitAt) / 1000) + 's age' : 'Server start er por ekbaro ashe nai: Facebook Developer > Webhooks > Callback URL/Verify Token check korun');
-  add(!!fb.status.lastFeedAt, 'Facebook comment ("feed") event pathiyeche', fb.status.lastFeedAt ? 'Last: ' + Math.round((Date.now() - fb.status.lastFeedAt) / 1000) + 's age' : 'Ekhono ekta-o ashe nai. Page e ekta comment korun, tarpor abar check korun. Tao na ashle Facebook Developer > Webhooks > Page > feed Subscribe + App Live mode lagbe');
+  add(!!fb.status.lastFeedAt || (!!S.get('comment_poll_on') && !cp.lastError && !!cp.lastRunAt), 'Facebook comment ("feed") event pathiyeche', fb.status.lastFeedAt ? 'Last: ' + Math.round((Date.now() - fb.status.lastFeedAt) / 1000) + 's age' : 'Webhook e ashe nai, kintu polling cholche tai comment tobuo pabe (eta thik ache)');
   const bad = out.find((x) => !x.ok);
   s.json({ ok: !bad, first_problem: bad ? `${bad.name}: ${bad.msg}` : 'Shob thik. Comment korle log e "Notun comment" ashbe', checks: out });
 }));
