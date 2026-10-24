@@ -210,7 +210,7 @@ const lrow=e=>{const t=new Date(e.t).toLocaleTimeString('en-GB');return `<div cl
 function lapply(){document.querySelectorAll('#log .ll').forEach(r=>{const okf=lfil==='all'||r.dataset.l===lfil||r.dataset.t===lfil;const okq=!lq||r.textContent.toLowerCase().includes(lq);r.hidden=!(okf&&okq)})}
 pages.logs=async()=>{
   const old=await api('/logs?limit=200');
-  $('#main').innerHTML=`<div class="chips">${['all','error','warn','ok','message','reply','ai','order','comment','voice'].map(f=>`<span class="chip ${lfil===f?'on':''}" data-a="lfil" data-f="${f}">${f}</span>`).join('')}<span class="chip" data-a="lpause" id="lp">${lpause?'Resume':'Pause'}</span><span class="chip" data-a="lclear">Clear</span></div><input id="lq" placeholder="Search..." value="${esc(lq)}" style="margin-bottom:8px"><div class="card" style="padding:0"><div id="log" style="max-height:68vh;overflow:auto">${old.map(lrow).join('')}</div></div>`;
+  $('#main').innerHTML=`<div class="chips">${['all','error','warn','ok','message','reply','ai','order','comment','voice'].map(f=>`<span class="chip ${lfil===f?'on':''}" data-a="lfil" data-f="${f}">${f}</span>`).join('')}<span class="chip" data-a="lpause" id="lp">${lpause?'Resume':'Pause'}</span><span class="chip" data-a="lcopy">Copy</span><span class="chip" data-a="lclear">Clear</span></div><input id="lq" placeholder="Search..." value="${esc(lq)}" style="margin-bottom:8px"><div class="card" style="padding:0"><div id="log" style="max-height:68vh;overflow:auto">${old.map(lrow).join('')}</div></div>`;
   const box=$('#log');box.scrollTop=box.scrollHeight;lapply();
   $('#lq').oninput=e=>{lq=e.target.value.toLowerCase();lapply()};
   es=new EventSource('/api/logs/stream');
@@ -315,6 +315,9 @@ const H={
   lfil(b){lfil=b.dataset.f;document.querySelectorAll('[data-a=lfil]').forEach(c=>c.classList.toggle('on',c.dataset.f===lfil));lapply()},
   lpause(b){lpause=!lpause;b.textContent=lpause?'Resume':'Pause'},
   lclear(){$('#log').innerHTML=''},
+  async lcopy(){const txt=[...document.querySelectorAll('#log .ll')].filter(r=>!r.hidden).map(r=>r.innerText.replace(/\n+/g,' | ').trim()).join('\n');
+    try{await navigator.clipboard.writeText(txt)}catch{const t=document.createElement('textarea');t.value=txt;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}
+    toast('Log copy hoyeche ('+txt.split('\n').length+' line)')},
   dtab(b){dataTab=b.dataset.k;dataEdit=null;go('data')},
   dedit(b){dataEdit=window._dlist.find(x=>x._id===b.dataset.id);go('data')},
   dcancel(){dataEdit=null;go('data')},

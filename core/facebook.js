@@ -64,6 +64,16 @@ const pageInfo = () => graph('me?fields=id,name,category,fan_count,picture.type(
 const userName = async (psid) => { const j = await graph(`${psid}?fields=first_name,last_name`); return [j.first_name, j.last_name].filter(Boolean).join(' '); };
 const subscribe = () => graph('me/subscribed_apps', { method: 'POST', body: { subscribed_fields: ['messages', 'messaging_postbacks', 'feed'] } });
 const subscribed = () => graph('me/subscribed_apps');
+// If the pasted token is a USER token (not a Page token), find the page token(s) it can manage.
+// Returns [] when the token is already a Page token.
+async function pagesFromUserToken(token) {
+  const tk = String(token || '').trim();
+  const r = await fetch(`https://graph.facebook.com/${GV}/me/accounts?fields=id,name,access_token&limit=50`, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(20000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) return [];
+  return (j.data || []).filter((p) => p.access_token);
+}
+
 // make sure the page is subscribed to this app's webhook (idempotent); never throws
 async function ensureSubscribed(page, label) {
   try {
@@ -84,4 +94,4 @@ async function debugToken() {
   return j.data || null;
 }
 
-module.exports = { ensureSubscribed, runWith, status, hooks, graph, text, image, carousel, typing, seen, privateReply, replyComment, hideComment, pageInfo, userName, subscribe, subscribed, debugToken };
+module.exports = { pagesFromUserToken, ensureSubscribed, runWith, status, hooks, graph, text, image, carousel, typing, seen, privateReply, replyComment, hideComment, pageInfo, userName, subscribe, subscribed, debugToken };

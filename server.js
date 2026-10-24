@@ -74,7 +74,11 @@ function timers() {
 }
 
 async function subscribeAll() {
-  if (S.get('fb_page_token')) await fb.ensureSubscribed(null, 'Main page');
+  if (S.get('fb_page_token')) {
+    const pgs = await fb.pagesFromUserToken(S.get('fb_page_token')).catch(() => []);
+    if (pgs.length) { await S.save({ fb_page_token: pgs[0].access_token }); L.ok('facebook', 'Saved token User token chhilo, Page Token e bodlano holo: ' + pgs[0].name); }
+    await fb.ensureSubscribed(null, 'Main page');
+  }
   for (const p of await Pages.list().catch(() => [])) {
     if (!p.active) continue;
     const full = await Pages.byFbId(p.pageId).catch(() => null);

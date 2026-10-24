@@ -55,6 +55,18 @@ r.get('/schema', (q, s) => {
 });
 r.post('/settings', wrap(async (q, s) => {
   const before = S.get('fb_page_token');
+  const nt = String((q.body || {}).fb_page_token || '').trim();
+  if (nt && !nt.startsWith('••••')) {
+    q.body.fb_page_token = nt;
+    try {
+      const pgs = await fb.pagesFromUserToken(nt);
+      if (pgs.length) { // user token pasted: switch to the real Page token(s)
+        q.body.fb_page_token = pgs[0].access_token;
+        for (const extra of pgs.slice(1)) await Pages.add(extra.access_token).catch(() => {});
+        L.ok('facebook', `User token chhilo; "${pgs[0].name}" page er Page Token auto boshano holo${pgs.length > 1 ? ` (aro ${pgs.length - 1} ta page Pages e add)` : ''}`);
+      }
+    } catch (e) { L.warn('facebook', 'Token check hoyni: ' + e.message); }
+  }
   await S.save(q.body || {});
   L.ok('settings', 'Setting save hoyeche');
   if (S.get('fb_page_token') && S.get('fb_page_token') !== before) fb.ensureSubscribed(null, 'Main page').catch(() => {});
@@ -70,13 +82,19 @@ r.get('/connection', wrap(async (q, s) => {
       info.ok = true; info.page = { id: p.id, name: p.name, category: p.category, fans: p.fan_count, pic: p.picture && p.picture.data && p.picture.data.url };
       comments.setPageId(p.id);
       if (!S.get('page_name')) await S.save({ page_name: p.name });
-    } catch (e) { info.ok = false; info.error = e.message; }
+    } catch (e) {
+      info.ok = false; info.error = e.message;
+      if (/nonexisting field|fan_count|category/i.test(e.message)) info.error += ' | Eta shombhobto User token, Page Access Token na. Token ta abar Save korun, system auto Page token ber kore nebe (ba Graph API Explorer e Page select kore Page token newa).';
+    }
     try { info.subscribed = ((await fb.subscribed()).data || []).map((a) => ({ name: a.name, fields: a.subscribed_fields })); } catch (e) { info.subscribed_error = e.message; }
     try { const t = await fb.debugToken(); if (t) info.token = { valid: t.is_valid, type: t.type, expires: t.expires_at ? new Date(t.expires_at * 1000).toISOString().slice(0, 10) : 'never', scopes: t.scopes }; } catch {}
   }
   s.json(info);
 }));
-r.post('/connection/subscribe', wrap(async (q, s) => { await fb.subscribe(); L.ok('facebook', 'Page webhook e subscribe hoyeche'); s.json({ ok: true }); }));
+r.post('/connection/subscribe', wrap(async (q, s) => {
+  const pgs = await fb.pagesFromUserToken(S.get('fb_page_token')).catch(() => []);
+  if (pgs.length) { await S.save({ fb_page_token: pgs[0].access_token }); L.ok('facebook', 'User token chhilo, Page Token e bodlano holo: ' + pgs[0].name); }
+  await fb.subscribe(); L.ok('facebook', 'Page webhook e subscribe hoyeche'); s.json({ ok: true }); }));
 
 // ----- AI -----
 r.get('/ai/status', wrap(async (q, s) => s.json(await AI.status())));
