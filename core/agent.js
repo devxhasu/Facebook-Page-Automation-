@@ -134,7 +134,7 @@ const CORE_TOOLS = [
   fn('update_customer', 'Save customer details as soon as they are given.', { name: str, phone: str, address: str }),
   fn('calc_order', 'Calculate totals and send the order preview to the customer. Needs product code, qty and every required option.', { items: itemsSchema, inside_dhaka: { type: 'boolean' }, coupon: str, extra_discount_pct: { type: 'number' } }, ['items', 'inside_dhaka']),
   fn('place_order', 'Create the order ONLY after the customer explicitly confirmed the preview.', { payment_mode: { type: 'string', enum: ['cod', 'delivery_advance', 'full_advance'] }, customer_confirmed: { type: 'boolean' } }, ['payment_mode', 'customer_confirmed']),
-  fn('submit_payment', 'Record the payment details the customer typed. Never say the payment is confirmed.', { order_id: { type: 'integer' }, trx_id: str, sender_number: str, amount: { type: 'number' } }, ['order_id', 'trx_id', 'sender_number', 'amount']),
+  fn('submit_payment', 'Record the payment details the customer typed. Never say the payment is confirmed.', { order_id: { type: 'integer' }, trx_id: str, sender_number: str, amount: { type: 'number', description: 'Optional. Leave empty if the customer paid the required advance amount.' } }, ['order_id', 'trx_id', 'sender_number']),
   fn('order_status', 'Get the customer\'s order status.', { order_id: { type: 'integer' } }),
   fn('cancel_order', 'Cancel an order at the customer\'s request.', { order_id: { type: 'integer' }, reason: str }, ['order_id']),
   fn('change_order_items', 'Change products/qty/size of an order that has not shipped.', { order_id: { type: 'integer' }, items: itemsSchema }, ['order_id', 'items']),
@@ -163,6 +163,27 @@ async function showProducts(ctx, codes) {
   }
   return { photos_sent: sent, products: ps.map(P.brief), note: sent ? undefined : 'No photo available for this product' };
 }
+
+// Turn a tool error into a plain instruction so the model never misreports it to the customer
+const FIX = {
+  missing_option: (r) => `The product IS available. Ask the customer ONLY for "${r.option}" (choose from: ${(r.values || []).join(', ')}). Do not say it is unavailable.`,
+  invalid_option: (r) => `The product IS available. That value is not valid; ask again for "${r.option}" with these choices only: ${(r.values || []).join(', ')}.`,
+  out_of_stock: (r) => `Only this error means it is unavailable (${r.name}, stock ${r.stock}). Say sorry softly in one line and suggest a similar product from search_products.`,
+  product_not_found: () => 'Wrong code. Call search_products to find the right product code. Do not tell the customer it is unavailable.',
+  no_items: () => 'No product chosen yet. Ask which product they want.',
+  bad_trx_format: () => 'TrxID must be 8-14 letters/digits (like 9H7AB3C2D1), copied exactly from the payment SMS. Ask once, kindly, to copy it from the SMS. If they cannot after one more try, call request_human.',
+  bad_sender_number: () => 'Ask for the 11 digit number (01XXXXXXXXX) they sent the money from.',
+  bad_amount: () => 'Use the amount they sent, or the required advance amount if they paid exactly that.',
+  amount_low: (r) => `They must send at least ${r.need} tk. Tell them softly.`,
+  trx_already_used: () => 'This TrxID was already used. Ask them to check and send the correct one.',
+  missing_customer_info: (r) => `Ask the customer ONLY for their ${r.need}${r.need === 'address' ? ' (full address with area, at least 8 characters)' : ''}.`,
+  suspicious_phone: () => 'Politely ask for the correct mobile number.',
+  customer_has_not_confirmed: () => 'Wait until the customer clearly says yes/confirm after the preview.',
+  no_preview_yet: () => 'Call calc_order first, then wait for the customer to confirm.',
+  customer_has_not_replied_after_preview: () => 'Wait for the customer to reply to the preview first.',
+  daily_limit: () => 'Daily order limit reached. Say the admin will contact them (request_human).',
+};
+const fixFor = (res) => (res && res.error && FIX[res.error] ? { ...res, what_to_do: FIX[res.error](res) } : res);
 
 async function exec(ctx, name, a, c) {
   switch (name) {
@@ -220,7 +241,7 @@ async function exec(ctx, name, a, c) {
     case 'submit_payment': {
       const o = await ownOrder(c, a.order_id);
       if (!o) return { error: 'order_not_found' };
-      const r = await O.submitPayment(o, { trx: a.trx_id, sender: a.sender_number, amount: a.amount });
+      const r = await O.submitPayment(o, { trx: a.trx_id, sender: a.sender_number, amount: a.amount || o.required_now });
       return r.ok ? { ok: true, note: 'Tell the customer the admin will verify the payment and the order confirms after that.' } : r;
     }
     case 'order_status': {
@@ -262,6 +283,17 @@ async function exec(ctx, name, a, c) {
 }
 
 // ---------- prompt ----------
+async function nextStep(c, open) {
+  const pay = (open || []).find((o) => o.status === 'awaiting_payment');
+  if (pay) return `Order #${pay.id} waits for the advance payment of ${pay.required_now} tk (the amount is already known, do NOT ask for it). Collect only the TrxID and the sender number, then call submit_payment. Payment details were already sent; do not resend them.`;
+  if ((open || []).some((o) => o.status === 'payment_review')) return 'Payment is with the admin for verification. Reassure the customer in one line; do not ask for payment again.';
+  if (c.draft) return 'The order preview was sent. Wait for the customer to confirm and choose the payment option; then call place_order. Do not recalculate unless they change something.';
+  const miss = [!c.phone && 'phone number', !c.address && 'full address'].filter(Boolean);
+  if (c.interest && miss.length) return `If the customer has chosen a product and its options, ask for the missing: ${miss.join(' and ')} (ask in one message).`;
+  return 'Help the customer find a product and move gently towards choosing options, then phone and address.';
+}
+
+
 async function buildSystem(c, isFirst, voice, pageName, hits) {
   const bundles = await col('bundles').find({ active: { $ne: false } }).toArray();
   const bundleText = bundles.length ? `\n- Bundle offers (mention once if relevant; the server applies the price automatically when all products are in the cart): ${bundles.slice(0, 10).map((b) => `${b.name} = ${(b.codes || []).join(' + ')} for ${b.price} tk`).join('; ')}.` : '';
@@ -307,6 +339,22 @@ ORDER FLOW
 9. Complaint, wrong or damaged item, return, exchange, refund: call create_ticket (with order_id if known) and tell the customer the ticket number. Anger or anything else you cannot handle: request_human. Stay calm.
    If update_customer says suspicious_phone, politely ask the customer for their correct number.
 ${voice ? '10. The last message came from a voice message: repeat any phone number or address back and ask the customer to confirm before saving.' : ''}
+
+NEXT STEP (decided by the server from the facts below; follow it)
+${await nextStep(c, open)}
+
+EXAMPLES OF THE RIGHT VOICE (Banglish; copy the warmth and shortness, not the exact words)
+Customer: T Shirt lagbe
+You: [call search_products then show_products] "Ji, Black T Shirt ache, 500 tk. Size S/M/L/XL, kon size dibo?"
+Customer: M
+You: "Darun, M size. Apnar phone number ar puro address ta din ji."
+Customer: (gives phone + address)
+You: [call update_customer, calc_order] "Dhonnobad ji. Upore hishab ta dilam, thik thakle payment kivabe korben, delivery advance (60 tk) na full?"
+Customer: dam kom hobe?
+You: "Ji, quality ta bhalo tai dam fixed. 2 ta nile delivery charge free hobe ji."
+Customer: ache?  (product not in catalog)
+You: "Ji, eta ekhon amader kache nai. Onno kichu dekhabo?"
+Never say "ami check kori / calculate kori / wait korun" before acting: just call the tool and then reply with the result.
 
 KNOWN ABOUT THIS CUSTOMER
 name: ${c.name || '(unknown)'} | facebook name: ${c.fbname || '(unknown)'} | phone: ${c.phone || '(unknown)'} | address: ${c.address || '(unknown)'} | delivered orders: ${c.orders_done || 0} | past choices: ${c.prefs ? Object.entries(c.prefs).map(([k, v]) => k + ': ' + v).join(', ') : 'none'}
@@ -362,7 +410,7 @@ async function handle(ctx, input) {
         for (const tc of msg.tool_calls) {
           let args = {}, res;
           try { args = JSON.parse(tc.function.arguments || '{}'); } catch {}
-          try { res = await exec(ctx, tc.function.name, args, c); } catch (e) { L.error('tool', `${tc.function.name} fail: ${e.message}`, e); res = { error: 'tool_failed', detail: e.message }; }
+          try { res = fixFor(await exec(ctx, tc.function.name, args, c)); } catch (e) { L.error('tool', `${tc.function.name} fail: ${e.message}`, e); res = { error: 'tool_failed', detail: e.message }; }
           L.info('tool', `${tc.function.name} -> ${res && res.error ? 'error: ' + res.error : 'ok'}`);
           msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(res).slice(0, 3000) });
         }

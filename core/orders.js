@@ -87,12 +87,12 @@ const lineText = (l) => {
 
 function previewText(c, cu) {
   return [
-    'Order summary:',
+    'Apnar order er hishab:',
     ...c.lines.map(lineText),
     c.bundles && c.bundles.length ? `Bundle offer: ${c.bundles.join(', ')}` : null,
     c.discount ? `Discount: -${money(c.discount)}` : null,
-    `Delivery: ${money(c.delivery)}`,
-    `Total: ${money(c.total)}`,
+    `Delivery charge: ${money(c.delivery)}`,
+    `Mot: ${money(c.total)}`,
     `Naam: ${cu.name || cu.fbname || '-'}`,
     `Phone: ${cu.phone || '-'}`,
     `Address: ${cu.address || '-'}`,
@@ -124,7 +124,7 @@ async function paymentInstructions(o) {
   return [
     `Order #${o.id} peyechi. Confirm korte ${money(o.required_now)} pathan:`,
     nums, '', S.get('pay_note'),
-    'Pathiye TrxID, je number theke pathalen ta ar koto taka pathalen likhe din.',
+    'Pathiye shudhu TrxID ar je number theke pathalen ta likhe din.',
   ].join('\n');
 }
 

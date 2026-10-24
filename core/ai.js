@@ -27,7 +27,7 @@ async function overLimit() {
 }
 
 async function oai(p, key, model, messages, tools) {
-  const body = { model, messages };
+  const body = { model, messages, temperature: 0.4 };
   if (tools && tools.length) body.tools = tools;
   const headers = { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
   if (p === 'openrouter') { headers['HTTP-Referer'] = 'https://render.com'; headers['X-Title'] = 'FB Shop Agent'; }
