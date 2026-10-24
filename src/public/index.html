@@ -2,17 +2,16 @@
 <html lang="bn">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <title>AI Sales Agent Panel</title>
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
   <div id="app">
-    <!-- Login -->
     <div id="login-screen" class="screen">
       <div class="login-box">
         <h1>AI Sales Agent</h1>
-        <p class="subtitle">Facebook Page Auto Selling System</p>
+        <p class="subtitle">Full Control Panel</p>
         <input type="text" id="username" placeholder="Username" value="admin" />
         <input type="password" id="password" placeholder="Password" />
         <button onclick="login()">Login</button>
@@ -20,36 +19,33 @@
       </div>
     </div>
 
-    <!-- Main Panel -->
     <div id="main-screen" class="screen hidden">
-      <aside class="sidebar">
+      <div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+      <aside class="sidebar" id="sidebar">
         <div class="logo">AI Sales Agent</div>
         <nav>
           <a href="#" data-page="dashboard" class="active">Dashboard</a>
           <a href="#" data-page="orders">Orders</a>
           <a href="#" data-page="products">Products</a>
           <a href="#" data-page="connections">Connections</a>
+          <a href="#" data-page="ai-providers">AI Providers</a>
           <a href="#" data-page="knowledge">Knowledge</a>
           <a href="#" data-page="payments">Payments</a>
-          <a href="#" data-page="ai-providers">AI Providers</a>
-          <a href="#" data-page="logs">Live Logs</a>
           <a href="#" data-page="settings">Settings</a>
-          <a href="#" onclick="logout()">Logout</a>
+          <a href="#" data-page="logs">Live Logs</a>
+          <a href="#" onclick="logout();return false;">Logout</a>
         </nav>
       </aside>
-
       <main class="content">
         <header class="topbar">
+          <button class="menu-btn" onclick="toggleSidebar()" aria-label="Menu">☰</button>
           <h2 id="page-title">Dashboard</h2>
-          <div class="status-dot" id="conn-status" title="System status"></div>
         </header>
-        <div id="page-content">
-          <!-- Dynamic content -->
-        </div>
+        <div id="page-content"></div>
       </main>
     </div>
   </div>
-
+  <div id="modal-root"></div>
   <script src="/js/app.js"></script>
 </body>
 </html>
