@@ -25,7 +25,7 @@ const DEFAULTS = {
   new_customer_cod: false, trusted_after: 1, auto_cancel_hours: 6, max_orders_per_day: 3,
   delivery_inside: 60, delivery_outside: 120, free_delivery_min: 0, max_discount_pct: 0, upsell_on: true, low_stock: 3,
   comment_public_reply: true, comment_private_reply: true, comment_price_public: false,
-  comment_delay_min: 8, comment_delay_max: 25, comment_hide_abusive: false,
+  comment_poll_on: true, comment_delay_min: 8, comment_delay_max: 25, comment_hide_abusive: false,
   tg_on: false, tg_token: '', tg_chat: '', tg_events: '', daily_report: true,
   imgbb_key: '',
   follow_up_on: true, follow_up_hours: 20, image_match_on: true,

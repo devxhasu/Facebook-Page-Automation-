@@ -43,7 +43,7 @@ module.exports = [
     B('follow_up_on', '24 ghontar moddhe ekbar follow-up ("ekhono nite chan?")'), N('follow_up_hours', 'Customer chup thakle koto ghonta pore follow-up (max 23)'), B('image_match_on', 'Customer er chobi catalog er chobir shathe milabe'),
   ] },
   { id: 'comments', title: 'Comment reply', fields: [
-    B('comment_public_reply', 'Public reply dibe'), B('comment_private_reply', 'Inbox e private reply dibe'), B('comment_price_public', 'Public reply te dam bolbe'),
+    B('comment_poll_on', 'Comment auto khuje ber korbe (webhook na ashleo kaj kore)'), B('comment_public_reply', 'Public reply dibe'), B('comment_private_reply', 'Inbox e private reply dibe'), B('comment_price_public', 'Public reply te dam bolbe'),
     N('comment_delay_min', 'Reply delay min (sec)'), N('comment_delay_max', 'Reply delay max (sec)'), B('comment_hide_abusive', 'Gali/abusive comment auto hide'),
   ] },
   { id: 'notify', title: 'Notification', fields: [

@@ -127,6 +127,8 @@ r.get('/comment-check', wrap(async (q, s) => {
     catch (e) { add(false, 'Post/comment porar permission', e.message + ' | pages_read_engagement permission lagbe'); }
     try { const t = await fb.debugToken(); if (t) { const sc = t.scopes || []; for (const p of ['pages_read_engagement', 'pages_manage_engagement', 'pages_messaging']) add(sc.includes(p), 'Permission ' + p, sc.includes(p) ? 'Ache' : 'Token e nai (Facebook App > Permissions, tarpor notun Page token nin)'); } } catch {}
   }
+  const cp = require('./commentpoll').state;
+  add(!!S.get('comment_poll_on') && !cp.lastError, 'Comment polling (webhook er backup)', !S.get('comment_poll_on') ? 'OFF: Settings > Comment reply e on korun' : cp.lastError ? 'Error: ' + cp.lastError : cp.lastRunAt ? `Cholche, last ${Math.round((Date.now() - cp.lastRunAt) / 1000)}s age, ${cp.found} ta notun comment peyechhe` : 'Prothom run 1 minute er moddhe');
   add(!!fb.status.lastHitAt, 'Facebook theke kono webhook ashche', fb.status.lastHitAt ? 'Last: ' + Math.round((Date.now() - fb.status.lastHitAt) / 1000) + 's age' : 'Server start er por ekbaro ashe nai: Facebook Developer > Webhooks > Callback URL/Verify Token check korun');
   add(!!fb.status.lastFeedAt, 'Facebook comment ("feed") event pathiyeche', fb.status.lastFeedAt ? 'Last: ' + Math.round((Date.now() - fb.status.lastFeedAt) / 1000) + 's age' : 'Ekhono ekta-o ashe nai. Page e ekta comment korun, tarpor abar check korun. Tao na ashle Facebook Developer > Webhooks > Page > feed Subscribe + App Live mode lagbe');
   const bad = out.find((x) => !x.ok);
