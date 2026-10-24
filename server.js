@@ -52,6 +52,7 @@ app.listen(port, () => L.info('boot', `Server port ${port} e shuru (DB connect h
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function timers() {
   setInterval(() => O.expireUnpaid().catch((e) => L.error('timer', e.message, e)), 10 * 60000);
+  setInterval(() => subscribeAll().catch(() => {}), 3600e3);
   setInterval(() => agent.followUps().catch((e) => L.error('followup', e.message, e)), 10 * 60000);
   // check Facebook token every 6h
   setInterval(async () => {

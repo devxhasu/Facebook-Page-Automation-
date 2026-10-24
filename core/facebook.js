@@ -6,7 +6,7 @@ const als = new AsyncLocalStorage();
 const runWith = (page, fn) => als.run(page || null, fn);
 const curToken = () => { const p = als.getStore(); return String((p && p.token) || S.get('fb_page_token') || '').trim(); };
 const GV = 'v21.0';
-const status = { lastOkAt: 0, lastError: '', lastEventAt: 0, tokenInvalid: false, lastHitAt: 0, sigFailAt: 0, standbyAt: 0, lastSendError: '', lastSendErrorAt: 0, lastSendOkAt: 0 };
+const status = { lastOkAt: 0, lastError: '', lastEventAt: 0, tokenInvalid: false, lastHitAt: 0, sigFailAt: 0, standbyAt: 0, lastSendError: '', lastSendErrorAt: 0, lastSendOkAt: 0, subFields: [], subAt: 0 };
 const hooks = { onTokenError: null };
 
 // plain-language reason for the common Facebook send/permission errors (shown in logs + panel)
@@ -74,14 +74,16 @@ async function pagesFromUserToken(token) {
   return (j.data || []).filter((p) => p.access_token);
 }
 
-// make sure the page is subscribed to this app's webhook (idempotent); never throws
+// make sure the page is subscribed to ALL fields we need (messages + postbacks + comments feed); idempotent, never throws
+const NEED = ['messages', 'messaging_postbacks', 'feed'];
 async function ensureSubscribed(page, label) {
   try {
     const run = (f) => (page ? als.run(page, f) : f());
-    const cur = ((await run(() => subscribed())).data || []).length;
-    if (cur) return true;
+    const have = new Set(((await run(() => subscribed())).data || []).flatMap((a) => a.subscribed_fields || []));
+    if (NEED.every((f) => have.has(f))) { status.subFields = [...have]; status.subAt = Date.now(); return true; }
     await run(() => subscribe());
-    L.ok('facebook', `${label || 'Page'} webhook e auto subscribe kora holo`);
+    status.subFields = NEED.slice(); status.subAt = Date.now();
+    L.ok('facebook', `${label || 'Page'} webhook e auto subscribe kora holo (${NEED.join(', ')})`);
     return true;
   } catch (e) { L.warn('facebook', `${label || 'Page'} auto subscribe hoyni: ${e.message}${e.hint ? ' | ' + e.hint : ''}`); return false; }
 }

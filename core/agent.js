@@ -64,7 +64,7 @@ async function sendHuman(ctx, text) {
   const clean = String(text || '').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/^[-•]\s+/gm, '').trim();
   if (!clean) return;
   let parts = clean.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
-  if (parts.length > 3) parts = [parts[0], parts[1], parts.slice(2).join('\n')];
+  if (parts.length > 2) parts = [parts[0], parts.slice(1).join('\n')];
   for (const p of parts) {
     if (S.get('typing_delay') !== false) { await ctx.out.typing(); await sleep(Math.min(2500, 500 + p.length * 22)); }
     await sendRaw(ctx, p);
@@ -262,7 +262,7 @@ async function exec(ctx, name, a, c) {
 }
 
 // ---------- prompt ----------
-async function buildSystem(c, isFirst, voice, pageName) {
+async function buildSystem(c, isFirst, voice, pageName, hits) {
   const bundles = await col('bundles').find({ active: { $ne: false } }).toArray();
   const bundleText = bundles.length ? `\n- Bundle offers (mention once if relevant; the server applies the price automatically when all products are in the cart): ${bundles.slice(0, 10).map((b) => `${b.name} = ${(b.codes || []).join(' + ')} for ${b.price} tk`).join('; ')}.` : '';
   const kb = await col('kb').find({ active: { $ne: false } }).toArray();
@@ -288,6 +288,13 @@ TRUTH
 - Budget or gift request ("1000 tk er moddhe gift"): call search_products with empty query and max_price, then suggest 2-3 options.
 - Past choices (see KNOWN): if the product has the same option, suggest it ("ager bar M nilen, ei bar-o M?") but wait for the customer to confirm; never assume.${bundleText}
 
+SELLING (be a warm, smart shopkeeper, never pushy)
+- Lead with the single best match, one short benefit (look, fabric, price) and ask one easy next question (size/color/quantity). Do not dump many options unless asked.
+- If the customer hesitates ("dam beshi", "pore nibo"): stay soft, mention real value or a bundle/free-delivery offer from the data once, never invent a discount, and leave the door open.
+- Once they show interest, move to the next step (options > phone > address > preview). Do not re-ask what you already know.
+- After an order or when it fits, one gentle extra suggestion at most (matching product or free-delivery gap). Never repeat it.
+- Customer silent or unsure: end with a light, friendly line, not a question loop.
+
 ORDER FLOW
 1. Find product -> collect missing options and quantity -> collect missing phone and address (name too only if none is known) -> call update_customer when you get them.
 2. Decide inside_dhaka from the address (ask only if truly unclear). Delivery: inside Dhaka ${S.get('delivery_inside')} tk, outside ${S.get('delivery_outside')} tk${S.num('free_delivery_min') ? `, free delivery above ${S.get('free_delivery_min')} tk` : ''}. Delivery time: ${S.get('delivery_time')}.
@@ -306,6 +313,7 @@ name: ${c.name || '(unknown)'} | facebook name: ${c.fbname || '(unknown)'} | pho
 ${c.draft ? `An order preview was already sent and is waiting for confirmation: ${JSON.stringify(c.draft.items)}` : ''}
 OPEN ORDERS: ${open.length ? open.map((o) => `#${o.id} ${o.status} total ${o.total} (${O.MODE_NAME[o.mode]})`).join('; ') : 'none'}
 
+${hits && hits.length ? `CATALOG MATCHES for the customer's last message (real data; use them, confirm details with search_products if needed): ${JSON.stringify(hits.map(P.brief))}\n` : ''}
 KNOWLEDGE (from the shop owner)
 ${kbText}
 
@@ -341,7 +349,9 @@ async function handle(ctx, input) {
   try {
     const hist = (await col('messages').find({ psid: c.psid }).sort({ t: -1 }).limit(12).toArray()).reverse().map((x) => ({ role: x.role, content: x.text }));
     while (hist.length && hist[0].role !== 'user') hist.shift();
-    const msgs = [{ role: 'system', content: await buildSystem(c, isFirst, m.voice, ctx.page && ctx.page.name) }, ...hist];
+    let hits = [];
+    try { const q = String(input.text || '').replace(/\[[^\]]*\]/g, '').trim().slice(0, 150); if (q.length > 1) hits = (await P.search(q, 4)).filter((p) => p.active !== false); } catch {}
+    const msgs = [{ role: 'system', content: await buildSystem(c, isFirst, m.voice, ctx.page && ctx.page.name, hits) }, ...hist];
     const tools = allTools();
     let finalText = '';
     for (let i = 0; i < 7; i++) {

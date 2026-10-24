@@ -42,7 +42,15 @@ private_reply: 2-3 short lines, same language, greeting like a real person, prod
   try {
     const r = await AI.chat('text', [{ role: 'system', content: sys }, { role: 'user', content: `COMMENT: ${text}\nPRODUCT DATA: ${JSON.stringify(products.map(P.brief))}` }]);
     out = parseJson(r.message.content);
-  } catch (e) { L.error('comment', 'Comment reply AI fail: ' + e.message, e); return; }
+  } catch (e) {
+    L.error('comment', 'Comment reply AI fail, simple reply dichhi: ' + e.message, e);
+    // no-AI fallback so a comment never goes unanswered
+    const wants = products.length || /price|dam|daam|koto|rate|lagbe|chai|available|ache|order|inbox|দাম|কত|লাগবে|চাই|আছে|অর্ডার|ইনবক্স/i.test(text);
+    if (!wants) return;
+    const pr = products[0];
+    out = { intent: 'price', public_reply: 'Details inbox e pathiyechi ji',
+      private_reply: pr ? `Assalamu alaikum. ${pr.name}${pr.variant ? ' (' + pr.variant + ')' : ''} er dam ${O.money(pr.price)}. Kon size/koyta lagbe ji?` : 'Assalamu alaikum. Kon product ta lagbe ji? Naam ba chobi pathaben.' };
+  }
   if (!out) { L.warn('comment', 'AI JSON dilo na, skip'); return; }
   if (out.intent === 'abusive' && S.get('comment_hide_abusive')) { fb.hideComment(cid).then(() => L.ok('comment', 'Abusive comment hide kora hoyeche')).catch((e) => L.warn('comment', e.message)); return; }
   if (['spam', 'abusive', 'other'].includes(out.intent) || (!out.public_reply && !out.private_reply)) { L.info('comment', `Skip (${out.intent})`); return; }
