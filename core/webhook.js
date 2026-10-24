@@ -24,21 +24,29 @@ router.get('/webhook', (req, res) => {
 });
 
 router.post('/webhook', (req, res) => {
-  const secret = S.get('fb_app_secret');
+  const secret = String(S.get('fb_app_secret') || '').trim();
+  fb.status.lastHitAt = Date.now();
+  L.info('webhook', 'Facebook theke webhook request ashlo');
   if (secret) {
     const sig = req.get('x-hub-signature-256') || '';
     const exp = 'sha256=' + crypto.createHmac('sha256', secret).update(req.rawBody || '').digest('hex');
     let ok = false;
     try { ok = sig.length === exp.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(exp)); } catch {}
-    if (!ok) { L.warn('webhook', 'Signature mile nai: App Secret thik ache kina dekhun'); return res.sendStatus(403); }
+    if (!ok) {
+      fb.status.sigFailAt = Date.now();
+      L.error('webhook', 'Signature mile nai, message ignore kora holo. Settings > Facebook > App Secret ta ei Facebook App er Settings > Basic > App Secret er shathe mile ki na dekhun (ba App Secret khali rakhun)');
+      return res.sendStatus(403);
+    }
   }
   res.sendStatus(200);
   const b = req.body || {};
-  if (b.object !== 'page') return;
+  if (b.object !== 'page') { L.warn('webhook', `Webhook object "${b.object}" ignore (page na)`); return; }
   fb.status.lastEventAt = Date.now();
   for (const en of b.entry || []) {
     Pages.byFbId(en.id).then((page) => {
       if (!page) return L.warn('webhook', `Page ${en.id} er token nai (Settings > Facebook ba Pages e add korun)`);
+      if ((en.standby || []).length) { fb.status.standbyAt = Date.now(); L.warn('webhook', 'Message "standby" hoye ashche: onno app (ba Page Inbox) primary receiver. Facebook App > Messenger > Advanced Messaging > Handover Protocol e ei app ke Primary Receiver korun'); }
+      if (!(en.messaging || []).length && !(en.changes || []).length && !(en.standby || []).length) L.info('webhook', 'Event ashlo kintu message/comment na (delivery/read hote pare)');
       for (const ev of en.messaging || []) onMessaging(ev, page);
       for (const ch of en.changes || []) {
         if (ch.field === 'feed') fb.runWith(page, () => comments.handle(ch.value, page)).catch((e) => L.error('comment', e.message, e));

@@ -56,7 +56,7 @@ function timers() {
   // check Facebook token every 6h
   setInterval(async () => {
     if (!S.get('fb_page_token')) return;
-    try { await fb.pageInfo(); L.ok('facebook', 'Token health check thik ache'); } catch (e) { L.error('facebook', 'Token health check fail: ' + e.message); N.admin('system', 'Facebook token e shomossha', e.message); }
+    try { await fb.pageInfo(); L.ok('facebook', 'Token health check thik ache'); subscribeAll().catch(() => {}); } catch (e) { L.error('facebook', 'Token health check fail: ' + e.message); N.admin('system', 'Facebook token e shomossha', e.message); }
   }, 6 * 3600e3);
   // daily report 22:00 Dhaka
   let lastDay = '';
@@ -71,6 +71,15 @@ function timers() {
     const total = rows.filter((x) => x._id !== 'cancelled').reduce((a, x) => a + x.sum, 0);
     N.admin('daily_report', `Ajker report (${day})`, `Notun order: ${rows.reduce((a, x) => a + x.n, 0)}\nBikri (cancel bade): ${O.money(total)}\nConfirmed ${g('confirmed').n}, Shipped ${g('shipped').n}, Delivered ${g('delivered').n}, Cancelled ${g('cancelled').n}`);
   }, 60000);
+}
+
+async function subscribeAll() {
+  if (S.get('fb_page_token')) await fb.ensureSubscribed(null, 'Main page');
+  for (const p of await Pages.list().catch(() => [])) {
+    if (!p.active) continue;
+    const full = await Pages.byFbId(p.pageId).catch(() => null);
+    if (full) await fb.ensureSubscribed(full, p.name || p.pageId);
+  }
 }
 
 async function boot() {
@@ -89,6 +98,8 @@ async function boot() {
   modules.initAll(app, [auth.require, auth.need('orders')], { S, col, O, L, N, bus, agent, fb, P, Pages });
   timers();
   state.ready = true; state.err = '';
+  // make sure Facebook really sends page messages to this server
+  setTimeout(() => subscribeAll().catch(() => {}), 3000);
   L.ok('boot', 'Shob ready. Panel khulun, Settings theke Facebook ar AI key boshan.');
 }
 boot().catch((e) => { state.err = 'Boot fail: ' + e.message; L.error('boot', state.err, e); });

@@ -116,6 +116,10 @@ pages.dash=async()=>{
   if(!d.fb.hasToken)warn.push('Facebook Page Token boshano hoyni (Settings > Facebook Connection)');
   if(!aiKeys)warn.push('Kono AI key boshano hoyni (Settings > AI providers)');
   if(!d.db)warn.push('Database connect nai');
+  if(d.fb.sigFailAt&&d.fb.sigFailAt>(d.fb.lastEventAt||0))warn.push('Facebook theke message ashche kintu App Secret mile nai ('+ago(d.fb.sigFailAt)+' age), tai bot reply dicche na. Settings > Facebook > App Secret thik korun ba khali rakhun');
+  if(d.fb.lastSendError&&d.fb.lastSendErrorAt>(d.fb.lastSendOkAt||0))warn.push('Customer ke reply pathano jayni ('+ago(d.fb.lastSendErrorAt)+' age): '+d.fb.lastSendError);
+  if(d.fb.standbyAt&&Date.now()-d.fb.standbyAt<86400000)warn.push('Message "standby" e ashche: onno app primary receiver. Facebook App > Messenger > Handover Protocol e ei app ke Primary Receiver korun');
+  if(d.fb.hasToken&&!d.fb.lastHitAt)warn.push('Server start howar por Facebook theke ekta webhook request-o ashe nai. Facebook Developer > Webhooks e Callback URL/Verify Token ar Page subscribe check korun, ar App Live mode e ache ki na dekhun');
   $('#main').innerHTML=`
   ${warn.map(w=>`<div class="card" style="border-color:var(--wa)"><b style="color:var(--wa)">Setup baki:</b> ${esc(w)}</div>`).join('')}
   <div class="card"><h3>Bot control</h3>${sw('bot_on','Bot chalu (master)',d.bot.bot_on)}${sw('messenger_on','Messenger reply',d.bot.messenger_on)}${sw('comment_on','Comment reply',d.bot.comment_on)}</div>

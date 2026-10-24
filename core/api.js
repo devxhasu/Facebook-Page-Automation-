@@ -53,7 +53,13 @@ r.get('/schema', (q, s) => {
   for (const m of modules.list()) sections.push({ id: 'mod_' + m.name, title: m.title + ' (module)', fields: [{ k: `mod_${m.name}_on`, l: 'Module chalu', t: 'bool' }, ...m.fields.map((f) => ({ k: f.key, l: f.label || f.key, t: f.type || (f.secret ? 'secret' : 'text'), h: f.hint }))] });
   s.json({ sections, values: S.masked() });
 });
-r.post('/settings', wrap(async (q, s) => { await S.save(q.body || {}); L.ok('settings', 'Setting save hoyeche'); s.json({ ok: true }); }));
+r.post('/settings', wrap(async (q, s) => {
+  const before = S.get('fb_page_token');
+  await S.save(q.body || {});
+  L.ok('settings', 'Setting save hoyeche');
+  if (S.get('fb_page_token') && S.get('fb_page_token') !== before) fb.ensureSubscribed(null, 'Main page').catch(() => {});
+  s.json({ ok: true });
+}));
 
 // ----- facebook connection -----
 r.get('/connection', wrap(async (q, s) => {
@@ -232,7 +238,7 @@ r.get('/pages', wrap(async (q, s) => s.json(await Pages.list())));
 r.post('/pages', wrap(async (q, s) => {
   const tok = String((q.body || {}).token || '').trim();
   if (!tok) return s.status(400).json({ error: 'Page Access Token din' });
-  try { const info = await Pages.add(tok); s.json({ ok: true, page: { id: info.id, name: info.name } }); } catch (e) { s.status(400).json({ error: e.message }); }
+  try { const info = await Pages.add(tok); const pg = await Pages.byFbId(info.id); if (pg) fb.ensureSubscribed(pg, info.name).catch(() => {}); s.json({ ok: true, page: { id: info.id, name: info.name } }); } catch (e) { s.status(400).json({ error: e.message }); }
 }));
 r.post('/pages/:id', wrap(async (q, s) => { await Pages.update(q.params.id, q.body || {}); s.json({ ok: true }); }));
 r.delete('/pages/:id', wrap(async (q, s) => { await Pages.remove(q.params.id); s.json({ ok: true }); }));
