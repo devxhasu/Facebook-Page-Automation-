@@ -10,10 +10,39 @@ const N = require('./notify');
 const M = require('./media');
 const Pages = require('./pages');
 const Selling = require('./selling');
+const I = require('./i18n');
+const Out = require('./outreach');
+const Hours = require('./hours');
 
+const ABUSE = /\b(fuck|fck|bastard|bitch|asshole|magi|magir|choda|chuda|chudi|chudbo|harami|haramjada|kutta|kuttar|kuttar bachcha|shala|shuor|bokachoda|khanki|bhodai)\b|মাগি|চোদ|হারামি|কুত্তা|শুয়োর|বোকাচোদা|খানকি/i;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const modTools = new Map();
 const registerTool = (def, handler) => modTools.set(def.function.name, { def, handler });
+// courier modules register live tracking: fn(order) -> 'pending' | 'in_transit' | 'hold' | 'delivered' | 'cancelled' | ''
+const trackers = new Map();
+const registerTracker = (courier, fn) => trackers.set(String(courier).toLowerCase(), fn);
+I.add({
+  'tr.pending': { bl: ' Courier er kache parcel ta ache, shighroi route e jabe.', bn: ' কুরিয়ারের কাছে পার্সেলটা আছে, শীঘ্রই রওনা হবে।', en: ' The courier has your parcel and it will move soon.' },
+  'tr.in_transit': { bl: ' Parcel ta ekhon raste ache.', bn: ' পার্সেলটা এখন রাস্তায় আছে।', en: ' Your parcel is on its way.' },
+  'tr.hold': { bl: ' Parcel ta ekhon hold e ache, courier apnake call korte pare. Phone ta khola rakhben.', bn: ' পার্সেলটা এখন হোল্ডে আছে, কুরিয়ার আপনাকে কল করতে পারে। ফোনটা খোলা রাখবেন।', en: ' Your parcel is on hold; the courier may call you. Please keep your phone on.' },
+  'tr.delivered': { bl: ' Courier delivered dekhacche.', bn: ' কুরিয়ার ডেলিভারড দেখাচ্ছে।', en: ' The courier shows it as delivered.' },
+  'tr.cancelled': { bl: ' Courier e ei parcel cancel dekhacche, admin ke janacchi.', bn: ' কুরিয়ারে এই পার্সেল ক্যান্সেল দেখাচ্ছে, অ্যাডমিনকে জানাচ্ছি।', en: ' The courier shows this parcel as cancelled; I am informing the admin.' },
+  'ad.ok': { bl: 'Admin ke janalam ji, shighroi reply pabenn.', bn: 'অ্যাডমিনকে জানালাম জি, শীঘ্রই রিপ্লাই পাবেন।', en: 'I have informed the admin; you will get a reply soon.' },
+  'ab.calm': { bl: ['Apnar kotha ta bujhte parchhi ji. Kono shomossha thakle bolun, help korbo.', 'Ji, kono shomossha hole shanto bhabe bolun, ami help korar chesta korbo.'], bn: ['আপনার কথাটা বুঝতে পারছি জি। কোনো সমস্যা থাকলে বলুন, সাহায্য করবো।'], en: ['I understand. If something is wrong, tell me calmly and I will try to help.'] },
+  'ab.firm': { bl: 'Ji, bhalo bhabe kotha bolle ami help korte parbo. Admin ke jaanalam.', bn: 'জি, ভালোভাবে কথা বললে আমি সাহায্য করতে পারবো। অ্যাডমিনকে জানালাম।', en: 'I can help if we keep the chat respectful. I have informed the admin.' },
+  'ah.note': { bl: 'Ekhon amader team offline ji, tobe apnar order ta ami nite pari. Admin shokal e confirm korbe.', bn: 'এখন আমাদের টিম অফলাইন জি, তবে আপনার অর্ডারটা আমি নিতে পারি। অ্যাডমিন সকালে কনফার্ম করবে।', en: 'Our team is offline right now, but I can take your order. The admin will confirm it in the morning.' },
+});
+const liveTrack = async (o, lg) => {
+  if (S.get('live_track_on') === false || !o.tracking || !o.tracking.courier) return '';
+  const fn = trackers.get(String(o.tracking.courier).toLowerCase());
+  if (!fn) return '';
+  try {
+    const st = await Promise.race([fn(o), new Promise((r) => setTimeout(() => r(''), 6000))]);
+    if (!st || !['pending', 'in_transit', 'hold', 'delivered', 'cancelled'].includes(st)) return '';
+    if (st === 'cancelled') await col('attention').insertOne({ psid: o.psid, name: o.name, reason: `Order #${o.id} courier e cancelled dekhacche`, resolved: false, createdAt: new Date() }).catch(() => {});
+    return I.t('tr.' + st, lg);
+  } catch { return ''; }
+};
 
 // ---------- output channels ----------
 const fbOut = (psid) => ({
@@ -26,19 +55,14 @@ const fbOut = (psid) => ({
 const testOut = (buf) => ({
   typing: async () => {},
   text: async (t) => { buf.push({ type: 'text', text: t }); },
-  quick: async (t, r) => { buf.push({ type: 'text', text: t, quick: r }); },
+  quick: async (t, r) => { buf.push({ type: 'text', text: t, quick: r.map((x) => (Array.isArray(x) ? x[0] : x)) }); },
   image: async (u) => { buf.push({ type: 'image', url: u }); },
   carousel: async (els) => { buf.push({ type: 'carousel', items: els.map((e) => ({ title: e.title, subtitle: e.subtitle, image: e.image_url })) }); },
 });
 
 // ---------- helpers ----------
-const dhakaNow = () => new Date(Date.now() + 6 * 3600e3);
-function inHours() {
-  if (!S.get('hours_on')) return true;
-  const d = dhakaNow(), m = d.getUTCHours() * 60 + d.getUTCMinutes();
-  const [a, b] = [S.get('hours_start'), S.get('hours_end')].map((s) => { const [h, mm] = String(s).split(':'); return (+h || 0) * 60 + (+mm || 0); });
-  return a <= b ? m >= a && m < b : m >= a || m < b;
-}
+const dhakaNow = Hours.dhakaNow;
+const inHours = Hours.inHours;
 
 async function attention(c, reason) {
   if (!c || c.test || String(c.psid).startsWith('TEST')) return;
@@ -78,7 +102,7 @@ async function sendHuman(ctx, text) {
 // ---------- media (photo / voice) ----------
 async function processMedia(ctx, input, c) {
   const parts = [];
-  let voice = false;
+  let voice = false, matchCode = '';
   for (const u of (input.images || []).slice(0, 3)) {
     try {
       const open = await col('orders').findOne({ psid: c.psid, status: { $in: ['awaiting_payment', 'payment_review'] } }, { sort: { id: -1 } });
@@ -101,6 +125,7 @@ async function processMedia(ctx, input, c) {
             if (cands.length) match = await AI.matchImage(buf, mime, cands);
           } catch (e) { L.warn('agent', 'Chobi milano fail: ' + e.message); }
         }
+        if (match) matchCode = match.code;
         parts.push(match
           ? `[Customer sent a photo. Catalog photo match: ${match.code} (confidence ${match.confidence}). It looks like: ${desc}. Verify with search_products and confirm with the customer before ordering.]`
           : `[Customer sent a photo. It looks like: ${desc}. Search the catalog for it; no photo match was found.]`);
@@ -125,7 +150,7 @@ async function processMedia(ctx, input, c) {
     }
   }
   if ((input.other || []).length) parts.push('[Customer sent a video/file/location you cannot open.]');
-  return { text: [input.text, ...parts].filter(Boolean).join('\n'), voice };
+  return { text: [input.text, ...parts].filter(Boolean).join('\n'), voice, match: matchCode };
 }
 
 // ---------- tools ----------
@@ -171,6 +196,7 @@ async function showProducts(ctx, codes) {
 // Turn a tool error into a plain instruction so the model never misreports it to the customer
 const FIX = {
   missing_option: (r) => `The product IS available. Ask the customer ONLY for "${r.option}" (choose from: ${(r.values || []).join(', ')}). Do not say it is unavailable.`,
+  option_sold_out: (r) => `${r.value} (${r.option}) is sold out right now for ${r.name}. Say so softly in one line and offer only these: ${(r.values || []).join(', ')}.`,
   invalid_option: (r) => `The product IS available. That value is not valid; ask again for "${r.option}" with these choices only: ${(r.values || []).join(', ')}.`,
   out_of_stock: (r) => `Only this error means it is unavailable (${r.name}, stock ${r.stock}). Say sorry softly in one line and suggest a similar product from search_products.`,
   product_not_found: () => 'Wrong code. Call search_products to find the right product code. Do not tell the customer it is unavailable.',
@@ -332,13 +358,18 @@ async function buildSystem(c, isFirst, voice, pageName, hits) {
   const open = await col('orders').find({ psid: c.psid, status: { $in: O.OPEN } }).sort({ id: -1 }).limit(3).toArray();
   const emoji = S.get('emoji_level') === 'none' ? 'Never use emoji.' : 'Almost never use emoji (at most one, rarely).';
   const greet = { auto: 'Greet like the customer does', salam: 'Greet with Salam', hello: 'Greet with Hello', none: 'Do not add any greeting' }[S.get('greeting_style')] || 'Greet like the customer does';
-  return `You are ${S.get('persona_name')}, chatting for the Facebook page "${pageName || S.get('page_name') || 'our shop'}", an online shop in Bangladesh. Write exactly like a real, polite shopkeeper on Messenger. Tone: ${S.get('tone')}.
+  const rl = String(S.get('reply_lang') || 'auto');
+  const langRule = rl === 'auto'
+    ? `Reply in the customer's own language and script. This customer writes ${I.LANG_NAME[c.lang] || I.LANG_NAME.bl}. Banglish if they type Banglish, Bangla script if they type Bangla, English only if they write English. Never Hindi/Urdu.`
+    : `ALWAYS reply in ${I.LANG_NAME[I.langOf(c)]}, whatever language the customer writes in. Never Hindi/Urdu.${rl === 'banglish' ? ' Mix common English words naturally (order, size, delivery, payment, confirm, price).' : ''}`;
+  return `You are ${S.get('persona_name')}, chatting for the Facebook page "${pageName || S.get('page_name') || 'our shop'}", an online shop in Bangladesh. You are a warm, quick, street-smart shopkeeper chatting on Messenger, not a form and not a script. Tone: ${S.get('tone')}.
 
 STYLE
-- Very short, soft and polite messages: 1 line (max 2) each, at most 2 messages in total. Use "ji" for politeness. NEVER call the customer "apu", "apa", "bhaiya", "sir" or "madam" (you do not know their gender); no pet names at all. No lists, no bold, no headings, no "Dear customer", no "Thank you for contacting us".
-- Reply in the customer's language and script: Banglish if they type Banglish, Bangla script if they type Bangla, English only if they write English. Never Hindi/Urdu. Never suggest other websites or shops.
+- Very short messages: 1 line (max 2), at most 2 messages in total. "ji" for politeness but not in every sentence. NEVER call the customer "apu", "apa", "bhaiya", "sir" or "madam" (you do not know their gender); no pet names. No lists, no bold, no headings, no "Dear customer", no "Thank you for contacting us".
+- LANGUAGE: ${langRule} Never suggest other websites or shops.
+- Sound human: answer the customer's actual question in the FIRST sentence, then at most one gentle next step. Vary your wording; never start two replies the same way; no corporate phrases. Match their energy (short question = short answer, worried = calm and reassuring in 3-4 words like "Tension nien na ji"). Simple everyday words.
 - If the customer names a product or category ("T Shirt lagbe"), call search_products at once and show_products; do not ask general questions first. If nothing matches, softly say it is not available now. ${emoji}
-- Ask only ONE question at a time. Never ask for anything listed under KNOWN. Never repeat what was already said.
+- Ask only ONE question at a time, preferably a choice ("Black na White?") instead of yes/no. Never ask for anything listed under KNOWN. Never repeat what was already said.
 - GREETING: ${greet}. ${isFirst ? 'This is the first message of this customer: if they greeted with salam answer "Walaikum assalam"; if they did not greet and style allows, start with "Assalamu alaikum" plus one short welcome line.' : 'Not the first message: do not greet again.'}
 - If the customer sincerely asks whether you are a bot or AI, say you are the page's virtual assistant. Never claim to be human.
 
@@ -350,12 +381,17 @@ TRUTH
 - Budget or gift request ("1000 tk er moddhe gift"): call search_products with empty query and max_price, then suggest 2-3 options.
 - Past choices (see KNOWN): if the product has the same option, suggest it ("ager bar M nilen, ei bar-o M?") but wait for the customer to confirm; never assume.${bundleText}
 
-SELLING (be a warm, smart shopkeeper, never pushy)
-- Lead with the single best match, one short benefit (look, fabric, price) and ask one easy next question (size/color/quantity). Do not dump many options unless asked.
-- If the customer hesitates ("dam beshi", "pore nibo"): stay soft, mention real value or a bundle/free-delivery offer from the data once, never invent a discount, and leave the door open.
-- Once they show interest, move to the next step (options > phone > address > preview). Do not re-ask what you already know.
-- After an order or when it fits, one gentle extra suggestion at most (matching product or free-delivery gap). Never repeat it.
-- Customer silent or unsure: end with a light, friendly line, not a question loop.
+SELLING (warm, smart, never pushy)
+- Read the signal: "dam koto?" or "ache?" = interest: give the price plus ONE real benefit (look, fabric, fit) and ask one easy question (size/color). Lead with the single best match; do not dump many options unless asked.
+- Objections (never invent discounts or facts; the server handles real bargaining and discount limits):
+  * "dam beshi": mention real value from the catalog, a bundle or the free-delivery offer once, stay friendly, leave the door open.
+  * "pore nibo / ekhon na": no pressure; say you will keep it in mind; mention low stock only when low_stock is true.
+  * trust / "original ki?" / "thokabe na to": calm, honest, only what the shop settings and Knowledge say (Cash on Delivery or advance rules exactly as given); never over-promise.
+  * "onno jaygay kom": never run down others; stress our quality and delivery.
+  * delivery worry: state the delivery time and charge from the data.
+- Close softly: sum up in one line (product + size + price) before asking for details; after they say yes, move on at once.
+- Once they show clear interest, move to the next step (options > phone > address > preview). Do not re-ask what you already know.
+- One gentle extra suggestion at most (matching product or free-delivery gap). Never repeat it. Customer silent or unsure: end with a light friendly line, not a question loop.
 
 ORDER FLOW
 1. Find product -> options and quantity -> ONLY after the customer chose a product and its options and wants to buy: collect the missing name, phone and full address (ONE short message) -> call update_customer. Never ask for these just because the customer showed interest or greeted. Follow NEXT STEP. If a detail looks wrong or incomplete (short/fake phone, address without area), ask again politely.
@@ -374,7 +410,7 @@ ${voice ? '10. The last message came from a voice message: repeat any phone numb
 NEXT STEP (decided by the server from the facts below; follow it)
 ${await nextStep(c, open)}
 
-EXAMPLES OF THE RIGHT VOICE (Banglish; copy the warmth and shortness, not the exact words)
+EXAMPLES OF THE RIGHT VOICE (shown in Banglish; copy the warmth and shortness in the language above, not the exact words)
 Customer: T Shirt lagbe
 You: [call search_products then show_products] "Ji, Black T Shirt ache, 500 tk. Size S/M/L/XL, kon size dibo?"
 Customer: M
@@ -404,7 +440,7 @@ const isYes = (t) => {
   const s = String(t || '').toLowerCase().trim().replace(/[.!।]+$/, '');
   if (!s || s.length > 40) return false;
   if (/\b(na|nah|not|cancel|change|bad|thak|pore|later|wait)\b|না|বাদ|পরে/.test(s)) return false;
-  return /confirm|kon[fp]arm|কনফার্ম|thik ache|thik achhe|ঠিক আছে|nibo|নিব/.test(s) || /^(ok|okay|ji|jii|hya|hyan|ha|haa|hae|hea|hoy|yes|y|thik|sure|done|ওকে|জি|হ্যাঁ|হ্যা|ঠিক)$/.test(s);
+  return /confirm|kon[fp]arm|কনফার্ম|thik ache|thik achhe|ঠিক আছে|nibo|নিব|place (the )?order|proceed|go ahead|looks good|sob thik|shob thik/.test(s) || /^(ok|okay|ji|jii|hya|hyan|ha|haa|hae|hea|hoy|yes|y|thik|sure|done|ওকে|জি|হ্যাঁ|হ্যা|ঠিক)$/.test(s);
 };
 async function payMethods() {
   const ms = await col('pay_methods').find({ active: { $ne: false } }).toArray();
@@ -423,21 +459,17 @@ function pickMethod(text, ms) {
 }
 const say = async (ctx, t, replies) => { if (S.get('typing_delay') !== false) { await ctx.out.typing(); await sleep(700); } await sendRaw(ctx, t, replies); return true; };
 const SH = { say: (ctx, t, r) => say(ctx, t, r), showProducts: (ctx, codes) => showProducts(ctx, codes), previewOrder: (ctx, c, items, opts) => previewOrder(ctx, c, items, opts) };
-const STATUS_TEXT = {
-  pending: (o) => `Order #${o.id} admin er approval er opekkhay ache ji.`,
-  awaiting_payment: (o) => `Order #${o.id} e ${O.money(o.required_now)} advance dile order confirm hobe ji.`,
-  payment_review: (o) => `Order #${o.id} er payment admin verify korche ji, shighroi confirm hobe.`,
-  confirmed: (o) => `Order #${o.id} confirm, ready kora hocche ji. Delivery ${S.get('delivery_time')}.`,
-  shipped: (o) => `Order #${o.id} pathano hoyeche ji.${o.tracking && o.tracking.code ? ` ${o.tracking.courier || 'Courier'}: ${o.tracking.code}` : ''}`,
-  delivered: (o) => `Order #${o.id} delivered hoyeche ji. Dhonnobad.`,
-  cancelled: (o) => `Order #${o.id} cancel kora hoyeche ji.`,
-  returned: (o) => `Order #${o.id} return hishebe dhora hoyeche ji.`,
+const statusText = async (o, c) => {
+  const lg = o.lang || c;
+  const track = o.tracking && o.tracking.code ? ` ${o.tracking.courier || 'Courier'}: ${o.tracking.code}` : '';
+  const base = I.t('st.' + o.status, lg, { id: o.id, amount: I.money(o.required_now, lg), time: S.get('delivery_time'), track });
+  return o.status === 'shipped' ? base + (await liveTrack(o, lg)) : base;
 };
 
 async function createAndInstruct(ctx, c, mode, method) {
   const r = await O.createOrder(c, mode, { test: ctx.channel === 'test' });
   if (r.error) {
-    if (r.error === 'missing_customer_info') return say(ctx, `Apnar ${r.need === 'name' ? 'naam' : r.need === 'phone' ? 'phone number' : 'puro address'} ta din ji.`);
+    if (r.error === 'missing_customer_info') return say(ctx, I.t('p.need', c, { what: I.t('need.' + r.need, c) }));
     return false; // let the AI handle it (it receives a clear instruction)
   }
   const o = r.order;
@@ -445,7 +477,7 @@ async function createAndInstruct(ctx, c, mode, method) {
   await col('customers').updateOne({ psid: c.psid }, { $set: { pay_stage: null } });
   if (method) await col('orders').updateOne({ id: o.id }, { $set: { pay_method: method.name } });
   if (o.status === 'confirmed') return say(ctx, O.summaryText(o));
-  if (o.status === 'pending') return say(ctx, `Order #${o.id} peyechi ji. Admin confirm korle janiye dibo.`);
+  if (o.status === 'pending') return say(ctx, I.t('p.pending', c, { id: o.id }));
   return say(ctx, method && method.number ? await O.paymentInstructionsFor(o, method) : await O.paymentInstructions(o));
 }
 
@@ -458,18 +490,18 @@ async function fastPath(ctx, c, text) {
 
   // 1) "amar order koi?"
   if (t.length < 60 && orders.length && !c.draft && /(order|অর্ডার).*(koi|kothay|kotodur|status|obostha|track|কই|কোথায়|স্ট্যাটাস)|^(amar|amr) order|delivery kobe|kobe pabo|কবে পাব/i.test(t)) {
-    return say(ctx, STATUS_TEXT[orders[0].status] ? STATUS_TEXT[orders[0].status](orders[0]) : `Order #${orders[0].id}: ${orders[0].status}`);
+    return say(ctx, await statusText(orders[0], c));
   }
   // 2) payment proof: TrxID / sender number / last 4 digits
   if (awaiting) {
     const ref = O.payRef(t);
     if (ref) {
       const r = await O.submitPayment(awaiting, { ...ref, sender: c.phone, amount: awaiting.required_now });
-      if (r.ok || r.error === 'trx_already_used') return say(ctx, 'Dhonnobad ji, payment er request peyechi. Admin verify korle order confirm hoye jabe.');
+      if (r.ok || r.error === 'trx_already_used') return say(ctx, I.t('p.thanks', c));
       return false;
     }
   }
-  if (review && O.payRef(t) && !c.draft) return say(ctx, `Order #${review.id} er payment admin verify korche ji, shighroi janabo.`);
+  if (review && O.payRef(t) && !c.draft) return say(ctx, I.t('p.review', c, { id: review.id }));
 
   // 3) customer chose the payment method
   if (c.draft && c.pay_stage === 'method') {
@@ -496,9 +528,8 @@ async function fastPath(ctx, c, text) {
     await col('customers').updateOne({ psid: c.psid }, { $set: { pay_stage: 'method' } });
     const first = adv.find((x) => x.mode === 'delivery_advance') || adv[0];
     const names = ms.map((m) => m.name);
-    const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' ba ' + names[names.length - 1] : names[0] || 'bKash/Nagad';
-    const extra = adv.length > 1 && first.mode === 'delivery_advance' ? ` (Chaile puro ${O.money(r.total)}-o dite paren)` : '';
-    return say(ctx, `Order confirm korte age ${O.money(first.pay_now)} advance dite hobe ji. ${list} kon ta e dibena?${extra}`, names.length > 1 ? names : undefined);
+    const extra = adv.length > 1 && first.mode === 'delivery_advance' ? I.t('p.extra_full', c, { total: I.money(r.total, c) }) : '';
+    return say(ctx, I.t('p.advance', c, { amount: I.money(first.pay_now, c), methods: I.list(names, c) || 'bKash/Nagad', extra }), names.length > 1 ? names : undefined);
   }
   // 5) guided selling: greeting, product picker, options, details
   if (!awaiting && !review) return Selling.step(ctx, c, t, SH);
@@ -513,6 +544,7 @@ async function applyCommentCtx(c) {
     const x = await col('comment_ctx').findOne({ psid: String(c.psid), used: { $ne: true }, at: { $gt: Date.now() - 7 * 86400e3 } });
     if (!x || !(x.codes || []).length) return;
     await col('comment_ctx').updateOne({ _id: x._id }, { $set: { used: true } });
+    if (x.post_id) { c.src_post = x.post_id; await col('customers').updateOne({ psid: c.psid }, { $set: { src_post: x.post_id } }); }
     if (x.codes.length === 1) { const set = { sel: { code: x.codes[0], options: {}, qty: 1, at: Date.now(), stage: 'options' }, interest: { codes: x.codes, at: Date.now() } }; Object.assign(c, set); await col('customers').updateOne({ psid: c.psid }, { $set: set }); }
     else { const set = { pick_list: x.codes, pick_at: Date.now(), interest: { codes: x.codes, at: Date.now() } }; Object.assign(c, set); await col('customers').updateOne({ psid: c.psid }, { $set: set }); }
   } catch (e) { L.warn('agent', 'Comment context lagano jayni: ' + e.message); }
@@ -535,12 +567,34 @@ async function handle(ctx, input) {
   if (!test) {
     if (!S.get('bot_on') || !S.get('messenger_on') || (ctx.page && (ctx.page.bot_on === false || ctx.page.messenger_on === false))) { await save(input.text || '[media]'); L.info('agent', 'Bot off, reply deini'); return once('offMsgAt', 360, S.get('bot_off_message')); }
     if (c.human_until && c.human_until > Date.now()) { await save(input.text || '[media]'); return L.info('agent', `AI paused for ${c.name || c.fbname || c.psid}`); }
-    if (!inHours()) { await save(input.text || '[media]'); return once('hoursMsgAt', 180, S.get('outside_hours_message')); }
+    if (!inHours()) {
+      if (S.get('after_hours_mode') === 'message') { await save(input.text || '[media]'); return once('hoursMsgAt', 180, S.get('outside_hours_message')); }
+      await once('hoursMsgAt', 180, I.t('ah.note', c));
+    }
   }
 
   const m = await processMedia(ctx, input, c);
   if (!m.text) return;
   await save(m.text);
+  if (I.learn(c, input.text)) await col('customers').updateOne({ psid: c.psid }, { $set: { lang: c.lang } });
+  if (!test) {
+    const pend = await Out.pending(c).catch(() => []);
+    for (const r of pend) await sendRaw(ctx, r.text).catch(() => {});
+    if (pend.length) await Out.done(pend);
+  }
+  if (!test && S.get('abuse_guard_on') !== false && ABUSE.test(String(input.text || ''))) {
+    const n = (c.abuse_n || 0) + 1;
+    const set = { abuse_n: n };
+    if (n >= 3) set.human_until = Date.now() + 12 * 3600e3;
+    await col('customers').updateOne({ psid: c.psid }, { $set: set });
+    if (n <= 2) await sendRaw(ctx, I.t(n === 1 ? 'ab.calm' : 'ab.firm', c));
+    if (n === 1 || n === 3) await attention(c, n === 1 ? 'Customer gali/rag dekhiyeche' : 'Bar bar gali: AI 12 ghonta pause');
+    return;
+  }
+  if (/^(admin er shathe kotha bolbo|talk to admin|admin ke den|real manush er shathe kotha bolbo)\.?$/i.test(String(input.text || '').trim())) {
+    await sendRaw(ctx, I.t('ad.ok', c)); await attention(c, 'Customer admin er shathe kotha bolte chay'); return;
+  }
+  if (m.match && !String(input.text || '').trim() && (await Selling.photoMatch(ctx, c, m.match, SH))) return;
   await col('customers').updateOne({ psid: c.psid }, { $set: { lastMsgAt: new Date() } });
   const isFirst = (await col('messages').countDocuments({ psid: c.psid })) <= 1;
   try {
@@ -636,4 +690,4 @@ async function followUps() {
   }
 }
 
-module.exports = { handle, testChat, forFb, followUps, registerTool, attention, getCustomer };
+module.exports = { handle, testChat, forFb, followUps, registerTool, registerTracker, attention, getCustomer };

@@ -11,7 +11,7 @@ const DEFAULTS = {
   hours_on: false, hours_start: '09:00', hours_end: '23:00',
   outside_hours_message: 'Ekhon amra off, shokal e uttor debo.',
   human_pause_min: 60, typing_delay: true,
-  persona_name: 'Rafi', page_name: '', greeting_style: 'auto', tone: 'friendly', emoji_level: 'low', delivery_time: '2-3 din',
+  persona_name: 'Rafi', page_name: '', reply_lang: 'auto', greeting_style: 'auto', tone: 'friendly', emoji_level: 'low', delivery_time: '2-3 din',
   fb_page_token: '', fb_app_id: '', fb_app_secret: '', fb_verify_token: '', public_url: '',
   ai_text_order: 'openrouter,gemini,grok,custom', ai_vision_order: 'openrouter,gemini,grok', ai_voice_order: 'gemini',
   openrouter_on: true, openrouter_keys: '', openrouter_model: 'openai/gpt-4o-mini',
@@ -25,9 +25,11 @@ const DEFAULTS = {
   new_customer_cod: false, trusted_after: 1, auto_cancel_hours: 6, max_orders_per_day: 3,
   delivery_inside: 60, delivery_outside: 120, free_delivery_min: 0, max_discount_pct: 0, upsell_on: true, low_stock: 3,
   comment_public_reply: true, comment_private_reply: true, comment_price_public: false,
-  comment_poll_on: true, comment_delay_min: 8, comment_delay_max: 25, comment_hide_abusive: false,
+  comment_poll_on: true, comment_delay_min: 8, comment_delay_max: 25, comment_hide_abusive: true, comment_hide_spam: true, comment_auto_link: true,
   tg_on: false, tg_token: '', tg_chat: '', tg_events: '', daily_report: true,
   imgbb_key: '',
+  risk_guard_on: true, fb_greeting_text: '', vip_spent: 10000, weekly_report: true, faq_on: true, size_guide: '', return_policy: '', trust_text: '', shop_address: '', cart_reminder_on: true, review_on: true, review_coupon_pct: 0,
+  after_hours_mode: 'take_orders', bargain_on: true, combo_offer_on: true, abuse_guard_on: true, takeover_on: true, live_track_on: true,
   follow_up_on: true, follow_up_hours: 20, image_match_on: true,
 };
 const SECRETS = new Set(['fb_page_token', 'fb_app_secret', 'openrouter_keys', 'gemini_keys', 'grok_keys', 'custom_url', 'tg_token', 'imgbb_key']);

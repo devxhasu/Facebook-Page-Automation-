@@ -16,6 +16,9 @@ function queue(key, fn) {
   p.finally(() => { if (queues.get(key) === p) queues.delete(key); });
 }
 
+// language independent meaning of quick-reply buttons (the text is what the guided-selling regexes understand)
+const CANON = { CONFIRM: 'confirm', CHANGE: 'change korbo', ADDR_OK: 'hya ei ta', ADDR_NEW: 'notun address', ZONE_IN: 'Dhaka-r moddhe', ZONE_OUT: 'Dhaka-r baire', YES: 'hya', NO: 'na', COMBO_YES: 'combo nibo', COMBO_NO: 'shudhu eta', WAIT_YES: 'hya janaben', WAIT_NO: 'dorkar nai', PIC_YES: 'hya eta', PIC_NO: 'na onno' };
+
 router.get('/webhook', (req, res) => {
   const { 'hub.mode': mode, 'hub.verify_token': tok, 'hub.challenge': ch } = req.query;
   if (mode === 'subscribe' && tok && tok === S.get('fb_verify_token')) { L.ok('webhook', 'Facebook webhook verify hoyeche'); return res.status(200).send(ch); }
@@ -57,19 +60,38 @@ router.post('/webhook', (req, res) => {
   }
 });
 
+// a message typed by a human in the Page inbox: pause the AI for that customer
+function onEcho(ev, page) {
+  if (S.get('takeover_on') === false) return;
+  const to = ev.recipient && ev.recipient.id, mid = ev.message && ev.message.mid;
+  if (!to || !mid) return;
+  setTimeout(async () => {
+    try {
+      if (await col('mids').findOne({ _id: 'out_' + mid })) return; // our own message
+      const mins = Math.max(1, S.num('human_pause_min'));
+      await col('customers').updateOne({ psid: String(to) }, { $set: { human_until: Date.now() + mins * 60000 } });
+      await col('messages').insertOne({ psid: String(to), role: 'assistant', text: (ev.message.text || '[admin]').slice(0, 500), t: Date.now(), by: 'admin' });
+      L.info('agent', `Admin inbox e likhechhe, AI ${mins} min pause: ${String(to).slice(-6)}`);
+    } catch (e) { L.warn('webhook', 'Echo handle fail: ' + e.message); }
+  }, 2500);
+}
+
 function onMessaging(ev, page) {
   const psid = ev.sender && ev.sender.id;
-  if (!psid || (ev.message && ev.message.is_echo)) return;
+  if (ev.message && ev.message.is_echo) { onEcho(ev, page); return; }
+  if (!psid) return;
   queue(psid, () => fb.runWith(page, async () => {
     const mid = (ev.message && ev.message.mid) || (ev.postback && ev.postback.mid);
     if (mid) { try { await col('mids').insertOne({ _id: mid, createdAt: new Date() }); } catch { return; } }
     const input = { text: '', images: [], audio: null, other: [] };
     if (ev.postback) {
       const p = ev.postback.payload || '';
-      input.text = p.startsWith('PICK:') ? `Ami ${p.slice(5)} code er product ta nibo.` : (ev.postback.title || 'hi');
+      const MENU = { GET_STARTED: 'hi', MENU_PRODUCTS: 'product dekhan', MENU_TRACK: 'amar order koi?', MENU_DELIVERY: 'delivery charge koto?', MENU_ADMIN: 'admin er shathe kotha bolbo' };
+      input.text = p.startsWith('PICK:') ? `Ami ${p.slice(5)} code er product ta nibo.` : (MENU[p] || ev.postback.title || 'hi');
     } else if (ev.message) {
       const m = ev.message;
-      input.text = m.text || (m.quick_reply && m.quick_reply.payload) || '';
+      const qp = m.quick_reply && m.quick_reply.payload ? String(m.quick_reply.payload) : '';
+      input.text = (qp.startsWith('QR:') && CANON[qp.slice(3)]) || m.text || qp || '';
       for (const a of m.attachments || []) {
         const url = a.payload && a.payload.url;
         if (a.type === 'image' && url && !(a.payload && a.payload.sticker_id)) input.images.push(url);

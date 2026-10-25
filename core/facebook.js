@@ -46,6 +46,7 @@ const send = async (psid, message) => {
   try {
     const j = await graph('me/messages', { method: 'POST', body: { recipient: { id: psid }, messaging_type: 'RESPONSE', message } });
     status.lastSendOkAt = Date.now(); status.lastSendError = '';
+    if (j && j.message_id) require('./db').col('mids').insertOne({ _id: 'out_' + j.message_id, createdAt: new Date() }).catch(() => {});
     return j;
   } catch (e) {
     status.lastSendError = e.message + (e.hint ? ' => ' + e.hint : ''); status.lastSendErrorAt = Date.now();
@@ -54,12 +55,21 @@ const send = async (psid, message) => {
   }
 };
 const text = (psid, t) => send(psid, { text: String(t).slice(0, 1900) });
-const textQR = (psid, t, replies) => send(psid, { text: String(t).slice(0, 1900), quick_replies: replies.slice(0, 13).map((r) => ({ content_type: 'text', title: String(r).slice(0, 20), payload: 'QR:' + String(r).slice(0, 60) })) });
+// replies: 'Title' or ['Title', 'CODE'] (CODE is language independent, see webhook CANON)
+const textQR = (psid, t, replies) => send(psid, { text: String(t).slice(0, 1900), quick_replies: replies.slice(0, 13).map((r) => { const [title, code] = Array.isArray(r) ? r : [r, '']; return { content_type: 'text', title: String(title).slice(0, 20), payload: 'QR:' + String(code || title).slice(0, 60) }; }) });
 const image = (psid, url) => send(psid, { attachment: { type: 'image', payload: { url, is_reusable: false } } });
 const carousel = (psid, elements) => send(psid, { attachment: { type: 'template', payload: { template_type: 'generic', elements: elements.slice(0, 10) } } });
 const typing = (psid, on = true) => graph('me/messages', { method: 'POST', body: { recipient: { id: psid }, sender_action: on ? 'typing_on' : 'typing_off' } });
 const seen = (psid) => graph('me/messages', { method: 'POST', body: { recipient: { id: psid }, sender_action: 'mark_seen' } });
-const privateReply = (commentId, t) => graph(`${commentId}/private_replies`, { method: 'POST', body: { message: String(t).slice(0, 1900) } });
+const privateReply = async (commentId, t) => {
+  const text = String(t).slice(0, 1900);
+  try { return await graph(`${commentId}/private_replies`, { method: 'POST', body: { message: text } }); }
+  catch (e1) {
+    // fallback: Send API with recipient.comment_id (current official way)
+    try { return await graph('me/messages', { method: 'POST', body: { recipient: { comment_id: commentId }, message: { text } } }); }
+    catch (e2) { e2.message = e1.message + ' || Send API: ' + e2.message; throw e2; }
+  }
+};
 const replyComment = (commentId, t) => graph(`${commentId}/comments`, { method: 'POST', body: { message: String(t).slice(0, 7000) } });
 const hideComment = (commentId) => graph(commentId, { method: 'POST', body: { is_hidden: true } });
 const pageInfo = () => graph('me?fields=id,name,category,fan_count,picture.type(large){url}');

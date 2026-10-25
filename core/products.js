@@ -11,13 +11,14 @@ async function all() {
 }
 const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
 
-// "Size: S,M,L" per line -> [{name, values}]
+// "Size: S,M,L" per line -> [{name, values, out}]. A value ending with "!" is sold out (XL!) : kept in out, not offered.
 function parseOptions(txt) {
   return String(txt || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
     const i = l.indexOf(':');
     if (i < 1) return null;
-    return { name: l.slice(0, i).trim(), values: l.slice(i + 1).split(',').map((s) => s.trim()).filter(Boolean) };
-  }).filter((o) => o && o.values.length);
+    const all = l.slice(i + 1).split(',').map((s) => s.trim()).filter(Boolean);
+    return { name: l.slice(0, i).trim(), values: all.filter((v) => !v.endsWith('!')), out: all.filter((v) => v.endsWith('!')).map((v) => v.slice(0, -1).trim()).filter(Boolean) };
+  }).filter((o) => o && (o.values.length || o.out.length));
 }
 function parseExtra(txt) {
   const o = {};
@@ -57,8 +58,20 @@ async function save(b) {
   let code = String(b.code || '').trim().toUpperCase();
   if (!code) code = 'P-' + (100 + (await nextId('product')));
   const dup = list.filter((p) => p.code !== code && norm(p.name) === norm(doc.name) && norm(p.variant) === norm(doc.variant)).map((p) => p.code);
+  const prev = list.find((p) => p.code === code);
   await col('products').updateOne({ code }, { $set: doc, $setOnInsert: { code, createdAt: now } }, { upsert: true });
   bust();
+  if (prev) {
+    try {
+      const O = require('./outreach');
+      if ((prev.stock || 0) <= 0 && doc.stock > 0 && doc.active) O.restocked(code, null).catch(() => {});
+      for (const po of prev.options || []) {
+        const no = doc.options.find((x) => x.name === po.name);
+        if (!no) continue;
+        for (const v of po.out || []) if (!(no.out || []).includes(v) && doc.stock > 0) O.restocked(code, { option: po.name, value: v }).catch(() => {});
+      }
+    } catch {}
+  }
   return { code, duplicate: dup, sameName: list.filter((p) => p.code !== code && norm(p.name) === norm(doc.name)).map((p) => p.code) };
 }
 async function remove(code) { await col('products').deleteOne({ code }); bust(); }
@@ -103,12 +116,19 @@ async function matchProducts(text, max = 10) {
   return strong.slice(0, max).map((x) => x.p);
 }
 
+// similar in-stock products: other variants of the same name first, then the same category
+async function alternatives(p, n = 4) {
+  const live = (await all()).filter((x) => x.active && x.stock > 0 && x.code !== p.code);
+  const same = live.filter((x) => norm(x.name) === norm(p.name));
+  const cat = p.category ? live.filter((x) => x.category === p.category && !same.includes(x)) : [];
+  return [...same, ...cat].slice(0, n);
+}
 const brief = (p) => ({
   code: p.code, name: p.name, variant: p.variant || undefined, price: p.price, stock: p.stock, low_stock: p.stock <= S.num('low_stock'),
-  options: (p.options || []).map((o) => ({ name: o.name, values: o.values })),
+  options: (p.options || []).map((o) => ({ name: o.name, values: o.values, sold_out_values: (o.out || []).length ? o.out : undefined })),
   details: p.extra && Object.keys(p.extra).length ? p.extra : undefined,
   description: p.description ? p.description.slice(0, 240) : undefined,
   has_photo: (p.images || []).length > 0,
 });
 
-module.exports = { matchProducts, cleanQuery, searchScored, all, get, save, remove, search, brief, adjustStock, bust, parseOptions, norm };
+module.exports = { alternatives, matchProducts, cleanQuery, searchScored, all, get, save, remove, search, brief, adjustStock, bust, parseOptions, norm };

@@ -4,6 +4,7 @@ const P = require('./products');
 const N = require('./notify');
 const bus = require('./bus');
 const L = require('./logger');
+const I = require('./i18n');
 
 const PHONE = /^(?:\+?88)?(01[3-9]\d{8})$/;
 const normPhone = (p) => { const m = String(p || '').replace(/[\s-]/g, '').match(PHONE); return m ? m[1] : null; };
@@ -37,7 +38,10 @@ async function calc(customer, items, { inside_dhaka = false, coupon = '', extra_
       const v = given[o.name.toLowerCase()];
       if (v == null || v === '') return { error: 'missing_option', code: p.code, name: p.name, option: o.name, values: o.values };
       const hit = o.values.find((x) => x.toLowerCase() === String(v).toLowerCase());
-      if (!hit) return { error: 'invalid_option', code: p.code, name: p.name, option: o.name, values: o.values };
+      if (!hit) {
+        if ((o.out || []).some((x) => x.toLowerCase() === String(v).toLowerCase())) return { error: 'option_sold_out', code: p.code, name: p.name, option: o.name, value: v, values: o.values };
+        return { error: 'invalid_option', code: p.code, name: p.name, option: o.name, values: o.values };
+      }
       chosen[o.name] = hit;
     }
     lines.push({ code: p.code, name: p.name, variant: p.variant, qty, price: p.price, options: chosen, total: p.price * qty });
@@ -80,60 +84,65 @@ async function calc(customer, items, { inside_dhaka = false, coupon = '', extra_
   return { ok: true, bundles: applied, lines, subtotal, discount, coupon: couponUsed, delivery, total, inside_dhaka: !!inside_dhaka, modes, free_delivery_gap: freeMin > 0 && !free ? freeMin - net : 0 };
 }
 
-const lineText = (l) => {
+const lineText = (l, lg) => {
   const opt = Object.entries(l.options || {}).map(([k, v]) => `${k}: ${v}`).join(', ');
-  return `${l.name}${l.variant ? ' (' + l.variant + ')' : ''}${opt ? ' [' + opt + ']' : ''} x ${l.qty} = ${money(l.total)}`;
+  return `${l.name}${l.variant ? ' (' + l.variant + ')' : ''}${opt ? ' [' + opt + ']' : ''} x ${l.qty} = ${I.money(l.total, lg)}`;
 };
 
 function previewText(c, cu) {
+  const lg = cu;
   return [
-    'Apnar order er hishab:',
-    ...c.lines.map(lineText),
-    c.bundles && c.bundles.length ? `Bundle offer: ${c.bundles.join(', ')}` : null,
-    c.discount ? `Discount: -${money(c.discount)}` : null,
-    `Delivery charge: ${money(c.delivery)}`,
-    `Mot: ${money(c.total)}`,
-    `Naam: ${cu.name || cu.fbname || '-'}`,
-    `Phone: ${cu.phone || '-'}`,
-    `Address: ${cu.address || '-'}`,
+    I.t('o.hishab', lg),
+    ...c.lines.map((l) => lineText(l, lg)),
+    c.bundles && c.bundles.length ? `${I.t('o.bundle', lg)} ${c.bundles.join(', ')}` : null,
+    c.discount ? `${I.t('o.discount', lg)} -${I.money(c.discount, lg)}` : null,
+    `${I.t('o.delivery', lg)} ${I.money(c.delivery, lg)}`,
+    `${I.t('o.total', lg)} ${I.money(c.total, lg)}`,
+    `${I.t('o.name', lg)} ${cu.name || cu.fbname || '-'}`,
+    `${I.t('o.phone', lg)} ${cu.phone || '-'}`,
+    `${I.t('o.address', lg)} ${cu.address || '-'}`,
+    S.get('upsell_on') && c.free_delivery_gap > 0 && c.free_delivery_gap <= 500 ? '\n' + I.t('o.tip_free', lg, { gap: I.money(c.free_delivery_gap, lg) }) : null,
     '',
-    'Shob thik thakle "confirm" likhun.',
+    I.t('o.confirm_line', lg),
   ].filter((x) => x !== null).join('\n');
 }
 
 function summaryText(o) {
+  const lg = o.lang || 'bl';
   const paid = o.paid || 0;
   return [
-    `Order #${o.id} confirm hoyeche`,
-    ...o.lines.map(lineText),
-    o.discount ? `Discount: -${money(o.discount)}` : null,
-    `Delivery: ${money(o.delivery)}`,
-    `Total: ${money(o.total)}`,
-    paid ? `Paid: ${money(paid)}` : null,
-    `Delivery te dite hobe: ${money(Math.max(0, o.total - paid))}`,
+    I.t('o.confirmed_h', lg, { id: o.id }),
+    ...o.lines.map((l) => lineText(l, lg)),
+    o.discount ? `${I.t('o.discount', lg)} -${I.money(o.discount, lg)}` : null,
+    `${I.t('o.delivery2', lg)} ${I.money(o.delivery, lg)}`,
+    `${I.t('o.total2', lg)} ${I.money(o.total, lg)}`,
+    paid ? `${I.t('o.paid', lg)} ${I.money(paid, lg)}` : null,
+    `${I.t('o.due', lg)} ${I.money(Math.max(0, o.total - paid), lg)}`,
     '',
-    `Naam: ${o.name}`, `Phone: ${o.phone}`, `Address: ${o.address}`,
-    `Delivery shomoy: ${S.get('delivery_time')}`,
-    'Order er status jante likhun: "amar order koi?"',
+    `${I.t('o.name', lg)} ${o.name}`, `${I.t('o.phone', lg)} ${o.phone}`, `${I.t('o.address', lg)} ${o.address}`,
+    `${I.t('o.dtime', lg)} ${S.get('delivery_time')}`,
+    I.t('o.track_hint', lg),
   ].filter((x) => x !== null).join('\n');
 }
 
 async function paymentInstructions(o) {
+  const lg = o.lang || 'bl';
   const ms = await col('pay_methods').find({ active: { $ne: false } }).toArray();
   const nums = ms.length ? ms.map((m) => `${m.name}: ${m.number}${m.note ? ' (' + m.note + ')' : ''}`).join('\n') : S.get('pay_numbers');
   return [
-    `Order #${o.id} peyechi. Confirm korte ${money(o.required_now)} pathan:`,
+    I.t('p.got_plain', lg, { id: o.id, amount: I.money(o.required_now, lg) }),
     nums, '', S.get('pay_note'),
-    'Pathiye shudhu TrxID ar je number theke pathalen ta likhe din.',
+    I.t('p.send_trx2', lg),
   ].join('\n');
 }
 
 async function paymentInstructionsFor(o, m) {
+  const lg = o.lang || 'bl';
   return [
-    `Order #${o.id} peyechi ji. ${money(o.required_now)} ${m.name} e Send Money korun:`,
+    I.t('p.got', lg, { id: o.id, amount: I.money(o.required_now, lg), method: m.name }),
     `${m.number}${m.note ? ' (' + m.note + ')' : ''}`,
     '',
-    'Pathiye TrxID likhe din (ba je number theke pathalen tar last 4 digit).',
+    I.t('p.send_trx', lg),
   ].join('\n');
 }
 
@@ -163,24 +172,26 @@ async function createOrder(customer, mode, { test = false } = {}) {
   }
   const dup = !test && (await col('orders').findOne({ phone, createdAt: { $gte: new Date(Date.now() - 86400e3) }, status: { $ne: 'cancelled' }, 'lines.code': { $in: c.lines.map((l) => l.code) } }));
   const id = 1000 + (await nextId('order'));
-  const status = mode === 'cod' ? (isTrusted(customer) ? 'confirmed' : 'pending') : 'awaiting_payment';
+  const rk = test ? { score: 0, reasons: [] } : await require('./crm').risk(customer, phone, customer.address);
+  const status = mode === 'cod' ? (isTrusted(customer) && rk.score < 2 ? 'confirmed' : 'pending') : 'awaiting_payment';
   const o = {
     id, psid: customer.psid, pageId: customer.pageId || '', name, phone, address: customer.address, inside_dhaka: c.inside_dhaka,
     lines: c.lines, subtotal: c.subtotal, discount: c.discount, coupon: c.coupon, delivery: c.delivery, total: c.total,
-    mode, required_now: m.pay_now, paid: 0, status, payments: [], screenshots: [], tracking: null,
-    flags: dup ? ['duplicate'] : [], test, createdAt: new Date(), history: [{ status, t: new Date(), by: 'ai' }],
+    mode, required_now: m.pay_now, paid: 0, status, payments: [], screenshots: [], tracking: null, lang: I.langOf(customer),
+    after_hours: !require('./hours').inHours(), post_id: customer.src_post || '', risk: rk, flags: [...(dup ? ['duplicate'] : []), ...(rk.score >= 2 ? ['risk'] : [])], test, createdAt: new Date(), history: [{ status, t: new Date(), by: 'ai' }],
   };
   await col('orders').insertOne(o);
+  if (rk.score >= 2) await col('customers').updateOne({ psid: customer.psid }, { $set: { risky: true } });
   const prefs = {};
   for (const l of c.lines) for (const [k, v] of Object.entries(l.options || {})) prefs[k] = v;
-  await col('customers').updateOne({ psid: customer.psid }, { $set: { draft: null, sel: null, pick_list: null, zone_q: false, lastOrderAt: new Date(), ...(Object.keys(prefs).length ? { prefs: { ...(customer.prefs || {}), ...prefs } } : {}) } });
+  await col('customers').updateOne({ psid: customer.psid }, { $set: { draft: null, sel: null, pick_list: null, zone_q: false, cart: null, bargain: null, lastOrderAt: new Date(), ...(Object.keys(prefs).length ? { prefs: { ...(customer.prefs || {}), ...prefs } } : {}) } });
   customer.draft = null;
   if (c.coupon) await col('coupons').updateOne({ code: c.coupon }, { $inc: { uses: 1 } });
   if (status === 'confirmed') await takeStock(o);
   bus.emit('order:new', o);
   if (!test) {
     const ev = status === 'pending' ? 'order_approval' : status === 'confirmed' ? 'order_new' : 'order_new';
-    N.admin(ev, `Notun order #${id} (${MODE_NAME[mode]})`, `${name} ${phone}\nTotal ${money(o.total)}${dup ? '\nSotorko: ekoi product er shathe ager order ache' : ''}`, id);
+    N.admin(ev, `Notun order #${id} (${MODE_NAME[mode]})`, `${name} ${phone}\nTotal ${money(o.total)}${dup ? '\nSotorko: ekoi product er shathe ager order ache' : ''}${rk.reasons.length ? '\nRISK: ' + rk.reasons.join('; ') : ''}`, id);
   }
   L.ok('order', `Order #${id} created (${mode}, ${status}) total ${o.total}`);
   return { order: o };
@@ -197,10 +208,10 @@ async function giveStock(o) { for (const l of o.lines) await P.adjustStock(l.cod
 
 const NOTICE = {
   confirmed: (o) => summaryText(o),
-  shipped: (o) => `Apnar order #${o.id} pathano hoyeche.${o.tracking ? ` ${o.tracking.courier || 'Courier'}: ${o.tracking.code || ''}` : ''}`,
-  delivered: (o) => `Order #${o.id} delivered hoyeche. Dhonnobad.`,
-  cancelled: (o) => `Order #${o.id} cancel kora hoyeche.${o.paid ? ' Advance er refund niye admin apnar shathe jogajog korbe.' : ''}`,
-  returned: (o) => `Order #${o.id} return hishebe nothibhukto hoyeche.`,
+  shipped: (o) => I.t('n.shipped', o.lang, { id: o.id, track: o.tracking ? ` ${o.tracking.courier || 'Courier'}: ${o.tracking.code || ''}` : '' }),
+  delivered: (o) => I.t('n.delivered', o.lang, { id: o.id }),
+  cancelled: (o) => I.t('n.cancelled', o.lang, { id: o.id, refund: o.paid ? I.t('n.refund', o.lang) : '' }),
+  returned: (o) => I.t('n.returned', o.lang, { id: o.id }),
 };
 
 async function setStatus(id, to, by = 'admin', note = '') {
@@ -212,6 +223,7 @@ async function setStatus(id, to, by = 'admin', note = '') {
   if (to === 'confirmed' && !o.stockTaken) await takeStock(o);
   if (['cancelled', 'returned'].includes(to) && o.stockTaken) { await giveStock(o); set.stockTaken = false; }
   if (to === 'cancelled' && (o.paid || 0) > 0) set.refund_pending = true;
+  if (to === 'delivered') set.deliveredAt = new Date();
   if (to === 'delivered' && !o.counted && !o.test) { await col('customers').updateOne({ psid: o.psid }, { $inc: { orders_done: 1 } }); set.counted = true; }
   if (to === 'confirmed' && from === 'awaiting_payment' && !o.paid) set.paid = o.required_now;
   await col('orders').updateOne({ id: o.id }, { $set: set, $push: { history: { status: to, t: new Date(), by, note } } });
@@ -267,7 +279,7 @@ async function paymentRejected(id) {
   const o = await col('orders').findOne({ id: Number(id) });
   if (!o) throw new Error('Order paoa jayni');
   await col('orders').updateOne({ id: o.id }, { $set: { status: 'awaiting_payment', 'payments.$[l].state': 'rejected' }, $push: { history: { status: 'awaiting_payment', t: new Date(), by: 'admin', note: 'payment rejected' } } }, { arrayFilters: [{ 'l.state': 'review' }] });
-  await N.customer(o.psid, 'Apnar payment verify kora jayni. Shothik TrxID ar number abar likhe din.', { test: o.test, orderId: o.id, pageId: o.pageId });
+  await N.customer(o.psid, I.t('n.pay_bad', o.lang), { test: o.test, orderId: o.id, pageId: o.pageId });
   return { ok: true };
 }
 

@@ -7,7 +7,7 @@ module.exports = {
     { key: 'steadfast_key', label: 'Steadfast Api-Key', type: 'secret', secret: true, default: '' },
     { key: 'steadfast_secret', label: 'Steadfast Secret-Key', type: 'secret', secret: true, default: '' },
   ],
-  init({ router, S, col, O, L }) {
+  init({ router, S, col, O, L, agent }) {
     const BASE = 'https://portal.packzy.com/api/v1';
     const headers = () => ({ 'Api-Key': S.get('steadfast_key'), 'Secret-Key': S.get('steadfast_secret'), 'Content-Type': 'application/json' });
     const ready = () => S.get('steadfast_key') && S.get('steadfast_secret');
@@ -44,6 +44,18 @@ module.exports = {
         }
       } catch (e) { L.warn('steadfast', 'Sync fail: ' + e.message); }
     }, 30 * 60000).unref();
+
+    if (agent && agent.registerTracker) agent.registerTracker('Steadfast', async (o) => {
+      if (!ready() || !o.tracking || !o.tracking.code) return '';
+      const r = await fetch(`${BASE}/status_by_trackingcode/${encodeURIComponent(o.tracking.code)}`, { headers: headers(), signal: AbortSignal.timeout(6000) });
+      const j = await r.json().catch(() => ({}));
+      const d = String(j.delivery_status || '');
+      if (/^delivered|partial_delivered/.test(d)) return 'delivered';
+      if (/cancel/.test(d)) return 'cancelled';
+      if (d === 'hold') return 'hold';
+      if (d === 'in_review' || d === 'pending') return 'pending';
+      return d ? 'in_transit' : '';
+    });
 
     router.get('/track/:id', async (req, res) => {
       try {

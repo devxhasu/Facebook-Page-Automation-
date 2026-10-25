@@ -26,6 +26,8 @@ async function handle(v, page) {
   if (!text) { L.info('comment', 'Skip: comment e kono lekha nai (shudhu photo/sticker)'); return; }
   if (page && String(from.id) === String(page.pageId)) { L.info('comment', 'Skip: eta page er nijer comment'); return; }
   if (v.parent_id && v.post_id && v.parent_id !== v.post_id) { L.info('comment', 'Skip: eta kono comment er reply (shudhu mul comment e reply hoy)'); return; }
+  const sp = await col('spam_users').findOne({ fbid: String(from.id) });
+  if (sp && sp.n >= 2) { L.info('comment', 'Skip: spam list e thaka user'); return; }
   L.info('comment', `Notun comment: "${text.slice(0, 60)}"`);
   try { await col('comments').insertOne({ _id: cid, createdAt: new Date() }); } catch { L.info('comment', 'Skip: ei comment age handle kora hoyeche'); return; }
   const key = `${v.post_id}:${from.id}`;
@@ -35,6 +37,7 @@ async function handle(v, page) {
   let products = [];
   const link = await col('post_links').findOne({ post_id: String(v.post_id) });
   if (link) { const p = await P.get(link.product_code); if (p) products = [p]; }
+  if (!products.length && S.get('comment_auto_link') !== false) products = await fromPost(v.post_id);
   if (!products.length) products = (await P.matchProducts(text, 3)).filter((p) => p.active !== false);
   const inStock = products.filter((p) => p.stock > 0);
   if (inStock.length) products = inStock;
@@ -51,6 +54,10 @@ async function handle(v, page) {
     } catch (e) { L.warn('comment', 'Comment classify AI fail, customer dhore reply dichhi: ' + e.message); }
   }
   if (intent === 'abusive' && S.get('comment_hide_abusive')) { fb.hideComment(cid).then(() => L.ok('comment', 'Abusive comment hide kora hoyeche')).catch((e) => L.warn('comment', e.message)); return; }
+  if (intent === 'spam') {
+    await col('spam_users').updateOne({ fbid: String(from.id) }, { $inc: { n: 1 }, $set: { name: from.name || '', at: new Date() } }, { upsert: true }).catch(() => {});
+    if (S.get('comment_hide_spam') !== false) fb.hideComment(cid).then(() => L.ok('comment', 'Spam comment hide kora hoyeche')).catch((e) => L.warn('comment', 'Spam hide hoyni: ' + e.message));
+  }
   if (intent !== 'info') { L.info('comment', `Skip (${intent}): ${text.slice(0, 40)}`); return; }
   await col('comments').updateOne({ _id: cid }, { $set: { key, replied: true } });
 
@@ -69,7 +76,7 @@ async function handle(v, page) {
         const psids = [...new Set([String(from.id), j && j.recipient_id ? String(j.recipient_id) : ''].filter(Boolean))];
         for (const id of psids) {
           await col('messages').insertOne({ psid: id, role: 'assistant', text: pText, t: Date.now() }).catch(() => {});
-          await col('comment_ctx').insertOne({ psid: id, codes: products.map((p) => p.code), at: Date.now(), used: false, text: text.slice(0, 200) }).catch(() => {});
+          await col('comment_ctx').insertOne({ psid: id, codes: products.map((p) => p.code), post_id: String(v.post_id || ''), at: Date.now(), used: false, text: text.slice(0, 200) }).catch(() => {});
         }
         L.ok('comment', 'Inbox e private reply gelo');
       } catch (e) {
@@ -82,6 +89,26 @@ async function handle(v, page) {
       catch (e) { L.error('comment', 'Public reply fail: ' + e.message + (e.hint ? ' | ' + e.hint : ''), e); }
     }
   }, wait);
+}
+
+// the post's own text names the product? (cached; links it automatically when exactly one product matches)
+async function fromPost(postId) {
+  if (!postId) return [];
+  try {
+    let pc = await col('post_cache').findOne({ _id: String(postId) });
+    if (!pc) {
+      const j = await fb.graph(`${postId}?fields=message`).catch(() => ({}));
+      pc = { _id: String(postId), message: String(j.message || ''), at: new Date() };
+      await col('post_cache').insertOne(pc).catch(() => {});
+    }
+    if (!pc.message) return [];
+    const ms = (await P.matchProducts(pc.message, 3)).filter((p) => p.active !== false);
+    if (ms.length === 1) {
+      await col('post_links').updateOne({ post_id: String(postId) }, { $setOnInsert: { post_id: String(postId), product_code: ms[0].code, note: 'auto (post text)', auto: true } }, { upsert: true }).catch(() => {});
+      L.ok('comment', `Post ${postId} auto link: ${ms[0].code}`);
+    }
+    return ms;
+  } catch (e) { L.warn('comment', 'Post theke product khuja jayni: ' + e.message); return []; }
 }
 
 // ---------- reply texts ----------

@@ -11,7 +11,7 @@ module.exports = {
     { key: 'pathao_store_id', label: 'Store ID', type: 'text', default: '' },
     { key: 'pathao_sandbox', label: 'Sandbox mode (test)', type: 'bool', default: false },
   ],
-  init({ router, S, col, O, L }) {
+  init({ router, S, col, O, L, agent }) {
     const base = () => (S.get('pathao_sandbox') ? 'https://courier-api-sandbox.pathao.com' : 'https://api-hermes.pathao.com');
     const ready = () => S.get('pathao_client_id') && S.get('pathao_client_secret') && S.get('pathao_username') && S.get('pathao_password') && S.get('pathao_store_id');
     let tok = { v: '', exp: 0 };
@@ -60,6 +60,15 @@ module.exports = {
       if (!r.ok) throw new Error('Pathao: ' + (j.message || 'HTTP ' + r.status));
       return String((j.data && (j.data.order_status || j.data.order_status_slug)) || '');
     }
+    if (agent && agent.registerTracker) agent.registerTracker('Pathao', async (o) => {
+      if (!ready() || !o.tracking || !o.tracking.code) return '';
+      const d = String(await status(o.tracking.code)).toLowerCase();
+      if (/deliver/.test(d) && !/fail|return/.test(d)) return 'delivered';
+      if (/cancel|return/.test(d)) return 'cancelled';
+      if (/hold/.test(d)) return 'hold';
+      if (/pending|assign|pickup/.test(d)) return 'pending';
+      return d ? 'in_transit' : '';
+    });
     router.get('/track/:id', async (req, res) => {
       try {
         const o = await col('orders').findOne({ id: Number(req.params.id) });

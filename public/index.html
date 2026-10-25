@@ -88,8 +88,8 @@ pre{white-space:pre-wrap;word-break:break-word;margin:0;font:12px/1.5 ui-monospa
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>Math.round(Number(n)||0).toLocaleString('en-US')+' tk';
-const TABS=[['dash','🏠 Home'],['orders','🛒 Orders'],['products','👕 Products'],['inbox','💬 Inbox'],['logs','📜 Logs'],['data','🗂 Data'],['settings','⚙️ Settings'],['test','🤖 Test chat']];
-let ME={role:'staff',perms:[]};const TABPERM={orders:'orders',products:'products',inbox:'inbox',logs:'logs',data:'data',settings:'settings',test:'test'};
+const TABS=[['dash','🏠 Home'],['orders','🛒 Orders'],['chats','💬 Chats'],['hot','🔥 Hot'],['products','👕 Products'],['inbox','📥 Inbox'],['reports','📊 Reports'],['posts','📌 Posts'],['logs','📜 Logs'],['data','🗂 Data'],['settings','⚙️ Settings'],['test','🤖 Test chat']];
+let ME={role:'staff',perms:[]};const TABPERM={chats:'inbox',hot:'inbox',reports:'orders',posts:'products',orders:'orders',products:'products',inbox:'inbox',logs:'logs',data:'data',settings:'settings',test:'test'};
 let page='dash',es=null,mods=[],pf=null,dataTab='kb',dataEdit=null,sess=Math.random().toString(36).slice(2,9);
 
 async function api(p,o={}){
@@ -154,9 +154,14 @@ pages.dash=async()=>{
     <div class="stat"><b>${d.attention}</b><span>Needs attention</span></div>
     <div class="stat"><b>${d.unknown}</b><span>AI jane na (proshno)</span></div>
     <div class="stat"><b>${d.tickets||0}</b><span>Open ticket</span></div>
+    <div class="stat"><b>${(d.summary||{}).chats||0}</b><span>Ajker chat</span></div>
+    <div class="stat"><b>${(d.summary||{}).newCustomers||0}</b><span>Notun customer</span></div>
+    <div class="stat"><b>${(d.summary||{}).hot||0}</b><span>Hot customer</span></div>
+    <div class="stat"><b>${(d.summary||{}).paused||0}</b><span>AI pause (apni dekhchhen)</span></div>
+    <div class="stat"><b>${(d.summary||{}).waiting||0}</b><span>Stock er opekkhay</span></div>
   </div><div style="height:12px"></div>
   <div class="card"><h3>Facebook connection</h3><div id="conn" class="sm mu">Last event: ${d.fb.lastEventAt?ago(d.fb.lastEventAt)+' age':'ekhono kono event ashe nai'}</div>
-    <div class="row" style="margin-top:8px"><button class="btn s p" data-a="conn">Test connection</button><button class="btn s" data-a="subscribe">Webhook subscribe</button><button class="btn s" data-a="ccheck">Comment check</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn s p" data-a="conn">Test connection</button><button class="btn s" data-a="subscribe">Webhook subscribe</button><button class="btn s" data-a="ccheck">Comment check</button><button class="btn s" data-a="menu">Messenger menu setup</button></div>
     <label>Webhook URL (Facebook Developer e dien)</label><input readonly value="${esc(d.webhook.url)}" onclick="this.select()">
     <label>Verify Token</label><input readonly value="${esc(d.webhook.verify)}" onclick="this.select()"></div>
   <div class="card"><h3>AI status</h3>${d.ai.providers.map(p=>`<div class="sm" style="margin:6px 0"><b>${esc(p.name)}</b> <span class="mu">${esc(p.model)}</span> ${p.on?'':'<span class="badge">off</span>'}<br>${p.keys.length?p.keys.map(k=>`<span class="badge ${k.ok===true?'b-ok':k.ok===false?'b-er':''}" title="${esc(k.err||'')}">${esc(k.id)} ...${esc(k.last4)} ${k.ok===true?'ok':k.ok===false?'fail':'untested'}</span>`).join(' '):'<span class="mu">key nai</span>'}</div>`).join('')}
@@ -167,7 +172,7 @@ pages.dash=async()=>{
 /* ---------- ORDERS ---------- */
 let ofil='';
 pages.orders=async()=>{
-  const list=await api('/orders'+(ofil?'?status='+ofil:''));
+  const list=await api('/orders'+(ofil?'?status='+ofil:''));window._ol=list;
   const sts=['','pending','awaiting_payment','payment_review','confirmed','shipped','delivered','cancelled','returned'];
   $('#main').innerHTML=`<div class="chips">${sts.map(s=>`<span class="chip ${ofil===s?'on':''}" data-a="ofil" data-s="${s}">${s||'all'}</span>`).join('')}</div>`+
   (list.map(o=>{
@@ -179,15 +184,16 @@ pages.orders=async()=>{
     if(o.status==='shipped')acts.push(['st:delivered','Delivered','p'],['st:returned','Returned','d']);
     const sf=mods.find(m=>m.name==='steadfast'&&m.enabled)&&o.status==='confirmed';
     const pt=mods.find(m=>m.name==='pathao'&&m.enabled)&&o.status==='confirmed';
-    return `<details><summary><div class="row sp"><b>#${o.id} ${esc(o.name)}</b>${badge(o.status)}</div><div class="sm mu">${money(o.total)} | ${esc(o.mode)}${o.test?' | TEST':''}${(o.flags||[]).includes('duplicate')?' | duplicate?':''}${o.notice_failed?' | CUSTOMER KE MESSAGE JAYNI':''}${o.refund_pending?' | REFUND pending':''}</div></summary><div>
+    return `<details><summary><div class="row sp"><b>#${o.id} ${esc(o.name)}</b>${badge(o.status)}</div><div class="sm mu">${money(o.total)} | ${esc(o.mode)}${o.test?' | TEST':''}${(o.flags||[]).includes('duplicate')?' | duplicate?':''}${o.notice_failed?' | CUSTOMER KE MESSAGE JAYNI':''}${o.refund_pending?' | REFUND pending':''}${(o.flags||[]).includes('risk')?' | ⚠️ RISK':''}${o.after_hours?' | raat e order':''}${o.post_id?' | post: '+esc(o.post_id):''}</div></summary><div>
       ${o.lines.map(l=>`<div>${esc(l.name)}${l.variant?' ('+esc(l.variant)+')':''} ${Object.entries(l.options||{}).map(([k,v])=>esc(k)+': '+esc(v)).join(', ')} x ${l.qty} = ${money(l.total)}</div>`).join('')}
       <div class="sm mu">Delivery ${money(o.delivery)} | Total ${money(o.total)} | Paid ${money(o.paid||0)} | Pay now needed ${money(o.required_now)}</div>
+      ${o.risk&&o.risk.reasons&&o.risk.reasons.length?`<div class="sm" style="color:var(--er);margin-top:6px">Sotorko: ${esc(o.risk.reasons.join('; '))}</div>`:''}
       ${o.notice_failed?`<div class="sm" style="color:var(--er);margin-top:6px">Customer ke message jayni (Facebook 24 ghonta niyom). Call korun: ${esc(o.phone)}</div>`:''}
       <div style="margin-top:6px">${esc(o.phone)}<br>${esc(o.address)}</div>
       ${(o.payments||[]).map(p=>`<div class="sm" style="margin-top:6px"><span class="badge b-wa">${esc(p.state)}</span> TrxID <b>${esc(p.trx)}</b> | ${esc(p.sender)} | ${money(p.amount)}</div>`).join('')}
       ${(o.screenshots||[]).map(u=>`<a href="${esc(u)}" target="_blank" class="sm">Screenshot</a> `).join('')}
       ${o.tracking?`<div class="sm">Tracking: ${esc(o.tracking.courier)} ${esc(o.tracking.code)}</div>`:''}
-      <div class="row" style="margin-top:8px">${acts.map(a=>`<button class="btn s ${a[2]||''}" data-a="oact" data-id="${o.id}" data-x="${a[0]}">${a[1]}</button>`).join('')}${sf?`<button class="btn s" data-a="steadfast" data-id="${o.id}">Steadfast e pathao</button>`:''}${pt?`<button class="btn s" data-a="pathao" data-id="${o.id}">Pathao te pathao</button>`:''}${o.refund_pending?`<button class="btn s" data-a="oact" data-id="${o.id}" data-x="refunded">Refund holo</button>`:''}${o.test?`<button class="btn s d" data-a="oact" data-id="${o.id}" data-x="delete">Delete</button>`:''}</div>
+      <div class="row" style="margin-top:8px">${acts.map(a=>`<button class="btn s ${a[2]||''}" data-a="oact" data-id="${o.id}" data-x="${a[0]}">${a[1]}</button>`).join('')}${sf?`<button class="btn s" data-a="steadfast" data-id="${o.id}">Steadfast e pathao</button>`:''}${pt?`<button class="btn s" data-a="pathao" data-id="${o.id}">Pathao te pathao</button>`:''}${o.refund_pending?`<button class="btn s" data-a="oact" data-id="${o.id}" data-x="refunded">Refund holo</button>`:''}<button class="btn s" data-a="omsg" data-p="${esc(o.psid)}">Customer ke message</button><button class="btn s" data-a="ocopy" data-id="${o.id}">Copy</button>${o.test?`<button class="btn s d" data-a="oact" data-id="${o.id}" data-x="delete">Delete</button>`:''}</div>
       <div class="sm mu" style="margin-top:6px">${(o.history||[]).map(h=>esc(h.status)+' ('+esc(h.by)+')').join(' > ')}</div></div></details>`}).join('')||'<div class="mu">Kono order nai</div>');
 };
 /* ---------- PRODUCTS ---------- */
@@ -206,7 +212,7 @@ function renderPF(){
   <div class="row"><div style="flex:1">${f('price','Price *','number')}</div><div style="flex:1">${f('stock','Stock *','number')}</div></div>
   ${f('category','Category')}<label>Description</label><textarea data-pf="description">${esc(p.description)}</textarea>
   ${f('aliases','Onno naam/keyword (comma diye): polo, পোলো')}
-  <label>Option (ek line e ekta). Customer ke order er shomoy jiggesh korbe</label><textarea data-pf="optionsText" placeholder="Size: S,M,L,XL&#10;Color: Black,White">${esc(p.optionsText)}</textarea>
+  <label>Option (ek line e ekta). Customer ke order er shomoy jiggesh korbe</label><textarea data-pf="optionsText" placeholder="Size: S,M,L,XL!&#10;Color: Black,White  (XL! = XL sold out)">${esc(p.optionsText)}</textarea>
   <label>Extra info (AI jabe). Jemon: Warranty: 6 mash</label><textarea data-pf="extraText">${esc(p.extraText)}</textarea>
   <label>Chobi</label><div class="imgs">${(p.images||[]).map((u,i)=>`<div><img src="${esc(u)}"><button data-a="pimgdel" data-i="${i}">x</button></div>`).join('')}</div>
   <input type="file" accept="image/*" multiple data-a="pupload">
@@ -223,7 +229,7 @@ pages.inbox=async()=>{
   $('#main').innerHTML=`<div class="card"><h3>Tickets (${tk.length})</h3>${tk.map(t=>`<div class="n"><b>#${t.id} ${esc(t.type)}</b> ${badge(t.status)} <span class="mu sm">${esc(t.name)} ${esc(t.phone||'')}${t.orderId?' | order #'+t.orderId:''}</span><div>${esc(t.details)}</div>${(t.notes||[]).map(n=>`<div class="sm mu">- ${esc(n.by)}: ${esc(n.text)}</div>`).join('')}<textarea id="tr-${t.id}" placeholder="Customer ke message (24 ghontar moddhe gele jabe) ba internal note"></textarea><div class="row" style="margin-top:6px"><button class="btn s" data-a="tkreply" data-id="${t.id}">Customer ke pathao</button><button class="btn s" data-a="tknote" data-id="${t.id}">Note</button><button class="btn s" data-a="tkst" data-id="${t.id}" data-s="in_progress">In progress</button><button class="btn s p" data-a="tkst" data-id="${t.id}" data-s="resolved">Resolved</button></div></div>`).join('')||'<div class="mu">Kono open ticket nai</div>'}</div>
   <div class="card"><h3>Needs attention (${att.length})</h3>${att.map(a=>`<div class="n"><b>${esc(a.name)}</b> <span class="mu sm">${ago(new Date(a.createdAt))}</span><div>${esc(a.reason)}</div><div class="row" style="margin-top:6px"><button class="btn s" data-a="ares" data-id="${a._id}">Resolved</button><button class="btn s" data-a="cust" data-p="${esc(a.psid)}" data-x="pause">AI pause</button></div></div>`).join('')||'<div class="mu">Kichu nai</div>'}</div>
   <div class="card"><h3>AI jane na (${unk.length})</h3><div class="sm mu">Uttor likhe dile Knowledge e save hoye AI shikhe nibe</div>${unk.map(u=>`<div class="n"><b>${esc(u.q)}</b><textarea id="ua-${u._id}" placeholder="Uttor"></textarea><button class="btn s p" data-a="uans" data-id="${u._id}" style="margin-top:6px">Save</button></div>`).join('')}</div>
-  <div class="card"><h3>Customers</h3>${cus.map(c=>`<div class="n"><b>${esc(c.name||c.fbname||c.psid)}</b> ${c.blocked?'<span class="badge b-er">blocked</span>':''}${c.human_until>Date.now()?'<span class="badge b-wa">AI paused</span>':''}<div class="sm mu">${esc(c.phone||'-')} | delivered ${c.orders_done||0}</div><div class="row" style="margin-top:4px">${c.blocked?`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="unblock">Unblock</button>`:`<button class="btn s d" data-a="cust" data-p="${esc(c.psid)}" data-x="block">Block</button>`}${c.human_until>Date.now()?`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="resume">AI resume</button>`:`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="pause">AI pause</button>`}</div></div>`).join('')||'<div class="mu">Customer nai</div>'}</div>`;
+  <div class="card"><h3>Customers</h3>${cus.map(c=>`<div class="n"><b>${esc(c.name||c.fbname||c.psid)}</b> ${(c.tags||[]).map(tagb).join('')} ${c.blocked?'<span class="badge b-er">blocked</span>':''}${c.human_until>Date.now()?'<span class="badge b-wa">AI paused</span>':''}<div class="sm mu">${esc(c.phone||'-')} | delivered ${c.orders_done||0}</div><div class="row" style="margin-top:4px">${c.blocked?`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="unblock">Unblock</button>`:`<button class="btn s d" data-a="cust" data-p="${esc(c.psid)}" data-x="block">Block</button>`}${c.human_until>Date.now()?`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="resume">AI resume</button>`:`<button class="btn s" data-a="cust" data-p="${esc(c.psid)}" data-x="pause">AI pause</button>`}</div></div>`).join('')||'<div class="mu">Customer nai</div>'}</div>`;
 };
 /* ---------- LOGS ---------- */
 const ICON={message:'📩',reply:'📤',ai:'🤖',tool:'🛠️',order:'🛒',comment:'💬',webhook:'🔗',voice:'🎤',facebook:'📘',boot:'🚀',db:'🗄️',notify:'🔔',telegram:'✈️',upload:'🖼️',steadfast:'🚚',system:'⚙️',auth:'🔐',crash:'💥',settings:'💾',api:'🧩',agent:'🧠',module:'📦'};
@@ -240,7 +246,7 @@ pages.logs=async()=>{
   es.onmessage=m=>{if(lpause)return;const e=JSON.parse(m.data);const b=$('#log');if(!b)return;if(lseen.has(lkey(e)))return;lseen.add(lkey(e));const near=b.scrollHeight-b.scrollTop-b.clientHeight<80;b.insertAdjacentHTML('beforeend',lrow(e));while(b.children.length>500)b.firstChild.remove();lapply();if(near)b.scrollTop=b.scrollHeight};
 };
 /* ---------- DATA (knowledge, coupons, post links) ---------- */
-const DATA={kb:{t:'Knowledge (AI eta dekhe uttor dey)',f:[['title','Title / proshno'],['content','Uttor / details','area'],['active','Active','bool']]},
+const DATA={kb:{t:'Knowledge (AI eta dekhe uttor dey)',f:[['title','Title / proshno'],['keywords','Keyword (comma diye, jemon: return, exchange). Customer eta likhle AI na, server hobuhu ei uttor dibe'],['content','Uttor / details','area'],['active','Active','bool']]},
  coupons:{t:'Coupon',f:[['code','Code'],['type','Type','select',['percent','flat']],['value','Value (% ba tk)'],['min','Minimum order (tk)'],['maxUses','Max use (0 = unlimited)'],['active','Active','bool']]},
  post_links:{t:'Post → Product link (comment er jonno)',f:[['post_id','Post ID (jemon 1234_5678)'],['product_code','Product code (P-101)'],['note','Note']]},
  pay_methods:{t:'Payment method (customer ke ei number dekhabe, prottekta on/off)',f:[['name','Naam (bKash, Nagad...)'],['number','Number'],['note','Note (Personal / Merchant)'],['active','Active','bool']]},
@@ -290,9 +296,68 @@ async function sendTest(){
   catch(e){$('#typ')&&$('#typ').remove();toast(e.message,true)}
   c.scrollTop=c.scrollHeight;
 }
+/* ---------- CHATS (live) ---------- */
+let chatPsid='';
+const tagb=t=>`<span class="badge ${t==='Hot'?'b-wa':t==='Problem'||t==='Risky'?'b-er':t==='VIP'||t==='Repeat'?'b-ok':''}">${esc(t)}</span>`;
+pages.chats=async()=>{
+  const list=await api('/chats');
+  $('#main').innerHTML=`<div class="card"><div class="sm mu">Customer chat dekhun, nije reply din. Apni reply dile AI kichukkhon pause thake. 🔴 = bot confused / apnar reply lagbe.</div></div>
+  <div id="chatbox"></div>`+
+  list.map(c=>`<div class="card" data-a="chatopen" data-p="${esc(c.psid)}" style="cursor:pointer"><div class="row sp"><b>${c.waiting||c.confused?'🔴 ':''}${esc(c.name)}</b><span class="sm mu">${c.t?ago(c.t)+' age':''}</span></div>
+    <div class="sm mu">${c.lastRole==='user'?'Customer: ':'Bot: '}${esc(c.last)}</div>
+    <div class="row" style="margin-top:4px">${(c.tags||[]).map(tagb).join('')}${c.paused?'<span class="badge b-wa">AI paused</span>':''}${c.blocked?'<span class="badge b-er">blocked</span>':''}</div></div>`).join('')||'<div class="mu">Kono chat nai</div>';
+  if(chatPsid)openChat(chatPsid);
+};
+async function openChat(psid){
+  chatPsid=psid;const r=await api('/chats/'+encodeURIComponent(psid));const c=r.customer;
+  $('#chatbox').innerHTML=`<div class="card" style="border-color:var(--ac)"><div class="row sp"><b>${esc(c.name||psid)}</b><button class="btn s" data-a="chatclose">Close</button></div>
+   <div class="sm mu">${esc(c.phone||'-')} | ${esc(c.address||'-')} | ${esc(c.lang||'')}</div><div class="row" style="margin:6px 0">${(c.tags||[]).map(tagb).join('')}${r.orders.map(o=>`<span class="badge">#${o.id} ${esc(o.status)}</span>`).join('')}</div>
+   <div class="chat" id="cbub" style="height:42vh">${r.messages.map(m=>`<div class="bub ${m.role==='user'?'bot':'me'}">${esc(m.text)}${m.by?`<div class="sm" style="opacity:.7">${esc(m.by)}</div>`:''}</div>`).join('')}</div>
+   <div class="row" style="margin-top:8px"><input id="csend" placeholder="Customer ke reply likhun..." style="flex:1"><button class="btn p" data-a="chatsend">Send</button></div>
+   <div class="row" style="margin-top:8px">${c.paused?`<button class="btn s" data-a="cust2" data-p="${esc(psid)}" data-x="resume">AI resume</button>`:`<button class="btn s" data-a="cust2" data-p="${esc(psid)}" data-x="pause">AI pause</button>`}</div></div>`;
+  const b=$('#cbub');if(b)b.scrollTop=b.scrollHeight;$('#chatbox').scrollIntoView({behavior:'smooth'});
+}
+/* ---------- HOT ---------- */
+pages.hot=async()=>{
+  const list=await api('/hot');
+  $('#main').innerHTML=`<div class="card"><div class="sm mu">Jara product dekhechhe/bachhai korechhe kintu order kore ni. Ek click e soft reminder pathan (24 ghontar baire hole queue te thake, customer abar likhle jabe).</div></div>`+
+  (list.map(c=>`<div class="card"><div class="row sp"><b>${esc(c.name)}</b><span class="badge b-wa">🔥 ${c.hot}</span></div><div class="sm mu">${esc(c.stage)} | ${esc(c.products.join(', ')||'-')} | ${esc(c.phone||'phone nai')}</div>
+   <div class="sm mu">${c.inWindow?'Ekhon message pathano jabe':'24 ghonta par, queue te thakbe'}</div><div class="row" style="margin-top:6px"><button class="btn s p" data-a="nudge" data-p="${esc(c.psid)}">Reminder pathao</button><button class="btn s" data-a="gochat" data-p="${esc(c.psid)}">Chat kholo</button></div></div>`).join('')||'<div class="mu">Ekhon kono hot customer nai</div>');
+};
+/* ---------- REPORTS ---------- */
+let rrange='today';
+pages.reports=async()=>{
+  const r=await api('/reports?range='+rrange);
+  const lst=(a,f)=>a.length?a.map(f).join(''):'<div class="mu sm">Kichu nai</div>';
+  $('#main').innerHTML=`<div class="chips">${[['today','Ajke'],['7d','7 din'],['30d','30 din']].map(x=>`<span class="chip ${rrange===x[0]?'on':''}" data-a="rrange" data-r="${x[0]}">${x[1]}</span>`).join('')}</div>
+  <div class="grid"><div class="stat"><b>${r.live}</b><span>Order</span></div><div class="stat"><b>${money(r.revenue)}</b><span>Bikri</span></div><div class="stat"><b>${money(r.avg)}</b><span>Gor order</span></div><div class="stat"><b>${r.newCust}</b><span>Notun customer</span></div><div class="stat"><b>${r.conversion}%</b><span>Order / notun customer</span></div><div class="stat"><b>${r.cancelled}</b><span>Cancelled</span></div></div><div style="height:12px"></div>
+  <div class="card"><h3>🏆 Best seller</h3>${lst(r.top,t=>`<div class="n row sp"><span>${esc(t.name)}</span><b>${t.qty} ta | ${money(t.revenue)}</b></div>`)}</div>
+  <div class="card"><h3>Kon size/color beshi chay</h3>${lst(r.topOpts,t=>`<div class="n row sp"><span>${esc(t.name)}</span><b>${t.qty}</b></div>`)}</div>
+  <div class="card"><h3>📌 Kon post theke order</h3>${lst(r.posts,t=>`<div class="n row sp"><span class="sm">${esc(t.post_id)}</span><b>${t.orders} order</b></div>`)}</div>
+  <div class="card"><h3>⚠️ Stock kom / sold out</h3>${lst(r.lowStock,t=>`<div class="n row sp"><span>${esc(t.name)}</span><b>${t.stock} ta</b></div>`)}${r.soldOut.map(x=>`<div class="sm mu">Sold out: ${esc(x)}</div>`).join('')}</div>`;
+};
+/* ---------- POSTS ---------- */
+pages.posts=async()=>{
+  let list=[];try{list=await api('/posts')}catch(e){$('#main').innerHTML='<div class="card"><b style="color:var(--er)">Post list ana jayni:</b> '+esc(e.message)+'</div>';return}
+  const pl=await api('/products');
+  $('#main').innerHTML=`<div class="card"><div class="sm mu">Post e kon product, ekhane thik korle comment e bot sothik product er dam/size bolbe. (Post er lekha theke auto link o hoy, "auto" likha thake.)</div></div>`+
+  list.map(p=>`<div class="card"><div class="row">${p.picture?`<img class="thumb" src="${esc(p.picture)}">`:''}<div style="flex:1"><div class="sm">${esc(p.message||'(lekha nai)')}</div><div class="sm mu">${esc(p.id)} ${p.auto?'<span class="badge">auto</span>':''}</div></div></div>
+   <div class="row" style="margin-top:6px"><select id="pl-${esc(p.id)}" style="flex:1"><option value="">-- product nai --</option>${pl.filter(x=>x.active).map(x=>`<option value="${esc(x.code)}" ${x.code===p.product_code?'selected':''}>${esc(x.code)} ${esc(x.name)} ${esc(x.variant||'')}</option>`).join('')}</select><button class="btn s p" data-a="plink" data-id="${esc(p.id)}">Save</button></div></div>`).join('')||'<div class="mu">Kono post paoa jayni</div>';
+};
 /* ---------- ACTIONS ---------- */
 const H={
   tab:b=>go(b.dataset.p),
+  async omsg(b){const t=prompt('Customer ke ki likhben?');if(!t)return;const r=await api('/chats/'+encodeURIComponent(b.dataset.p)+'/send',{method:'POST',body:{text:t}});toast(r.ok?'Pathano hoyeche':r.error,!r.ok)},
+  async ocopy(b){const o=(window._ol||[]).find(x=>String(x.id)===b.dataset.id);if(!o)return;const txt=`Order #${o.id}\n${o.name} ${o.phone}\n${o.address}\n${o.lines.map(l=>l.name+(l.variant?' '+l.variant:'')+' '+Object.values(l.options||{}).join('/')+' x'+l.qty).join('\n')}\nCOD: ${Math.max(0,o.total-(o.paid||0))} tk`;try{await navigator.clipboard.writeText(txt)}catch{const t=document.createElement('textarea');t.value=txt;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}toast('Copy hoyeche')},
+  async menu(){await api('/connection/menu',{method:'POST',body:{}});toast('Messenger menu + Get Started set hoyeche')},
+  chatopen(b){openChat(b.dataset.p)},
+  chatclose(){chatPsid='';$('#chatbox').innerHTML=''},
+  async chatsend(){const v=$('#csend').value.trim();if(!v)return;const r=await api('/chats/'+encodeURIComponent(chatPsid)+'/send',{method:'POST',body:{text:v}});if(!r.ok)return toast(r.error,true);toast('Pathano hoyeche');openChat(chatPsid)},
+  async cust2(b){await api('/customers/'+encodeURIComponent(b.dataset.p),{method:'POST',body:{action:b.dataset.x}});toast('Hoyeche');openChat(b.dataset.p)},
+  async nudge(b){const r=await api('/hot/'+encodeURIComponent(b.dataset.p)+'/nudge',{method:'POST',body:{}});toast(r.note)},
+  gochat(b){chatPsid=b.dataset.p;go('chats')},
+  rrange(b){rrange=b.dataset.r;go('reports')},
+  async plink(b){await api('/posts/link',{method:'POST',body:{post_id:b.dataset.id,product_code:document.getElementById('pl-'+b.dataset.id).value}});toast('Save hoyeche')},
   async login(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('#un').value,password:$('#pw').value})});const j=await r.json().catch(()=>({}));if(!r.ok)return toast(j.error||'Login hoyni',true);$('#pw').value='';start()},
   async logout(){await fetch('/api/logout',{method:'POST'});showLogin()},
   async bell(){const l=await api('/notifications');$('#ovc').innerHTML=`<div class="row sp"><b>Notification</b><button class="btn s" data-a="nread">Shob porlam</button></div>`+(l.map(n=>`<div class="n ${n.read?'':'un'}"><b>${esc(n.title)}</b><div class="sm mu">${esc(n.body||'')}</div></div>`).join('')||'<div class="mu">Kichu nai</div>')+`<button class="btn s" style="margin-top:10px" data-a="ovx">Close</button>`;$('#ov').style.display='block'},

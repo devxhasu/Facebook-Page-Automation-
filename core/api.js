@@ -18,11 +18,11 @@ const Pages = require('./pages');
 
 const r = express.Router();
 const wrap = (f) => (req, res) => Promise.resolve(f(req, res)).catch((e) => { L.error('api', `${req.method} ${req.originalUrl}: ${e.message}`, e); res.status(500).json({ error: e.message }); });
-const GEN = { kb: ['title', 'content', 'active'], coupons: ['code', 'type', 'value', 'min', 'maxUses', 'active'], post_links: ['post_id', 'product_code', 'note'], pay_methods: ['name', 'number', 'note', 'active'], bundles: ['name', 'codes', 'price', 'active'] };
+const GEN = { kb: ['title', 'content', 'keywords', 'active'], coupons: ['code', 'type', 'value', 'min', 'maxUses', 'active'], post_links: ['post_id', 'product_code', 'note'], pay_methods: ['name', 'number', 'note', 'active'], bundles: ['name', 'codes', 'price', 'active'] };
 const BACKUP = ['settings', 'products', 'customers', 'orders', 'payments', 'kb', 'coupons', 'post_links', 'counters', 'unknown', 'attention'];
 
 // permission per area (staff accounts only see what the owner allowed)
-const PERM = [[/^\/orders/, 'orders'], [/^\/(products|upload)/, 'products'], [/^\/(customers|attention|unknown|tickets)/, 'inbox'], [/^\/c\//, 'data'], [/^\/logs/, 'logs'],
+const PERM = [[/^\/(chats|hot)/, 'inbox'], [/^\/reports/, 'orders'], [/^\/posts/, 'products'], [/^\/orders/, 'orders'], [/^\/(products|upload)/, 'products'], [/^\/(customers|attention|unknown|tickets)/, 'inbox'], [/^\/c\//, 'data'], [/^\/logs/, 'logs'],
   [/^\/(schema|settings|connection|comment-check|ai|modules|pages)/, 'settings'], [/^\/test-chat/, 'test'], [/^\/(system|backup|restore|users)/, 'owner']];
 r.use((q, s, next) => {
   for (const [re, p] of PERM) if (re.test(q.path)) return auth.can(q.user, p) ? next() : s.status(403).json({ error: 'Ei kaj er permission nai' });
@@ -42,11 +42,19 @@ r.get('/dashboard', wrap(async (q, s) => {
     attention: await col('attention').countDocuments({ resolved: false }), unread: await col('notifications').countDocuments({ read: false }),
     unknown: await col('unknown').countDocuments({ answered: false }), tickets: await col('tickets').countDocuments({ status: { $ne: 'resolved' }, test: { $ne: true } }),
     broken: S.brokenKeys(),
+    summary: await todaySummary(start),
     bot: { bot_on: S.get('bot_on'), messenger_on: S.get('messenger_on'), comment_on: S.get('comment_on') },
     fb: { ...fb.status, hasToken: !!S.get('fb_page_token') }, ai, uptime: Math.round(process.uptime()), db: await ping().catch(() => false),
     webhook: { url: M.base() + '/webhook', verify: S.get('fb_verify_token') },
   });
 }));
+
+async function todaySummary(start) {
+  const nc = { test: { $ne: true } };
+  const hot = await col('customers').countDocuments({ ...nc, hot: { $gte: 40 } });
+  const waiting = await col('waitlist').countDocuments({ notified: false });
+  return { chats: await col('customers').countDocuments({ ...nc, lastMsgAt: { $gte: start } }), newCustomers: await col('customers').countDocuments({ ...nc, createdAt: { $gte: start } }), hot, waiting, paused: await col('customers').countDocuments({ ...nc, human_until: { $gt: Date.now() } }) };
+}
 
 // ----- settings -----
 r.get('/schema', (q, s) => {
@@ -200,6 +208,81 @@ r.post('/unknown/:id/answer', wrap(async (q, s) => {
   await col('unknown').updateOne({ _id: u._id }, { $set: { answered: true } });
   s.json({ ok: true });
 }));
+
+// ----- live chat (read the conversation, reply by hand; the AI pauses while you talk) -----
+r.get('/chats', wrap(async (q, s) => {
+  const cs = await col('customers').find({ test: { $ne: true }, lastMsgAt: { $exists: true } }).sort({ lastMsgAt: -1 }).limit(60).toArray();
+  const att = new Set((await col('attention').find({ resolved: false }).toArray()).map((a) => a.psid));
+  const out = [];
+  for (const c of cs) {
+    const last = await col('messages').find({ psid: c.psid }).sort({ t: -1 }).limit(1).toArray();
+    const m = last[0] || {};
+    const paused = (c.human_until || 0) > Date.now();
+    const age = Date.now() - (m.t || 0);
+    out.push({ psid: c.psid, name: c.name || c.fbname || c.psid, phone: c.phone || '', tags: c.tags || [], hot: c.hot || 0, last: String(m.text || '').slice(0, 90), lastRole: m.role || '', t: m.t || 0, paused, confused: att.has(c.psid), waiting: m.role === 'user' && age > 10 * 60000 && (paused || att.has(c.psid)), blocked: !!c.blocked });
+  }
+  s.json(out);
+}));
+r.get('/chats/:psid', wrap(async (q, s) => {
+  const c = await col('customers').findOne({ psid: q.params.psid });
+  if (!c) return s.status(404).json({ error: 'Customer paoa jayni' });
+  const msgs = (await col('messages').find({ psid: c.psid }).sort({ t: -1 }).limit(80).toArray()).reverse().map((m) => ({ role: m.role, by: m.by || '', text: m.text, t: m.t }));
+  const orders = await col('orders').find({ psid: c.psid }).sort({ id: -1 }).limit(5).toArray();
+  s.json({ customer: { psid: c.psid, name: c.name || c.fbname, phone: c.phone, address: c.address, tags: c.tags || [], lang: c.lang, paused: (c.human_until || 0) > Date.now(), blocked: !!c.blocked, lastMsgAt: c.lastMsgAt }, messages: msgs, orders: orders.map((o) => ({ id: o.id, status: o.status, total: o.total })) });
+}));
+r.post('/chats/:psid/send', wrap(async (q, s) => {
+  const c = await col('customers').findOne({ psid: q.params.psid });
+  const text = String((q.body || {}).text || '').trim().slice(0, 1800);
+  if (!c || !text) return s.status(400).json({ error: 'Message likhun' });
+  const ok = await N.customer(c.psid, text, { pageId: c.pageId });
+  if (!ok) return s.json({ ok: false, error: 'Message jayni: customer er last message er 24 ghonta pore Facebook allow kore na. Phone e call korun' + (c.phone ? ' (' + c.phone + ')' : '') });
+  await col('messages').insertOne({ psid: c.psid, role: 'assistant', text, t: Date.now(), by: q.user.username });
+  await col('customers').updateOne({ psid: c.psid }, { $set: { human_until: Date.now() + Math.max(1, S.num('human_pause_min')) * 60000 } });
+  s.json({ ok: true });
+}));
+
+// ----- hot customers (interested but not ordered yet) -----
+r.get('/hot', wrap(async (q, s) => {
+  const cs = await col('customers').find({ test: { $ne: true }, hot: { $gte: 40 } }).sort({ hot: -1 }).limit(60).toArray();
+  const out = [];
+  for (const c of cs) {
+    const names = [];
+    for (const code of (c.interest && c.interest.codes) || []) { const p = await P.get(code); if (p) names.push(`${p.name}${p.variant ? ' ' + p.variant : ''}`); }
+    out.push({ psid: c.psid, name: c.name || c.fbname || c.psid, phone: c.phone || '', hot: c.hot, products: names, stage: c.draft ? 'Preview dekhiyechi, confirm kore ni' : c.sel ? 'Product bachhai korechhe' : 'Dekhechhe', lastMsgAt: c.lastMsgAt, inWindow: require('./outreach').inWindow(c) });
+  }
+  s.json(out);
+}));
+r.post('/hot/:psid/nudge', wrap(async (q, s) => {
+  const c = await col('customers').findOne({ psid: q.params.psid });
+  if (!c) return s.status(404).json({ error: 'Customer paoa jayni' });
+  const text = String((q.body || {}).text || '').trim() || (await (async () => { const p = c.interest && c.interest.codes && (await P.get(c.interest.codes[0])); return require('./i18n').t('or.reminder', c, { name: p ? p.name : 'order' }); })());
+  const row = await require('./outreach').queue(c.psid, 'nudge', text, { pageId: c.pageId, key: `nudge:${c.psid}:${Date.now()}` });
+  const now = await col('outbox').findOne({ key: row.key });
+  s.json({ ok: true, sent: !!(now && now.sent), note: now && now.sent ? 'Pathano hoyeche' : 'Customer 24 ghonta age last message diyechhe, tai queue te rakha holo. Se abar likhle prothom line e jabe' });
+}));
+
+// ----- reports -----
+r.get('/reports', wrap(async (q, s) => {
+  const days = { today: 1, '7d': 7, '30d': 30 }[q.query.range] || 1;
+  s.json(await require('./reports').summary(days));
+}));
+
+// ----- page posts + product link -----
+r.get('/posts', wrap(async (q, s) => {
+  const j = await fb.graph('me/posts?fields=id,message,full_picture,created_time,permalink_url&limit=15');
+  const links = await col('post_links').find({}).toArray();
+  const by = Object.fromEntries(links.map((l) => [l.post_id, l]));
+  s.json((j.data || []).map((p) => ({ id: p.id, message: String(p.message || '').slice(0, 160), picture: p.full_picture || '', url: p.permalink_url || '', time: p.created_time, product_code: (by[p.id] || {}).product_code || '', auto: !!(by[p.id] || {}).auto })));
+}));
+r.post('/posts/link', wrap(async (q, s) => {
+  const id = String((q.body || {}).post_id || '').trim(), code = String((q.body || {}).product_code || '').trim().toUpperCase();
+  if (!id) return s.status(400).json({ error: 'Post ID nai' });
+  if (!code) { await col('post_links').deleteMany({ post_id: id }); return s.json({ ok: true }); }
+  if (!(await P.get(code))) return s.status(400).json({ error: 'Product code paoa jayni' });
+  await col('post_links').updateOne({ post_id: id }, { $set: { post_id: id, product_code: code, auto: false } }, { upsert: true });
+  s.json({ ok: true });
+}));
+r.post('/connection/menu', wrap(async (q, s) => { await require('./profile').setup(); s.json({ ok: true }); }));
 
 // ----- generic simple collections (knowledge, coupons, post links) -----
 r.get('/c/:n', wrap(async (q, s) => { if (!GEN[q.params.n]) return s.sendStatus(404); s.json(await col(q.params.n).find({}).sort({ _id: -1 }).limit(500).toArray()); }));

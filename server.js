@@ -53,6 +53,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function timers() {
   setInterval(() => O.expireUnpaid().catch((e) => L.error('timer', e.message, e)), 10 * 60000);
   require('./core/commentpoll').start();
+  require('./core/outreach').start();
+  require('./core/crm').start();
   setInterval(() => subscribeAll().catch(() => {}), 3600e3);
   setInterval(() => agent.followUps().catch((e) => L.error('followup', e.message, e)), 10 * 60000);
   // check Facebook token every 6h
@@ -60,18 +62,16 @@ function timers() {
     if (!S.get('fb_page_token')) return;
     try { await fb.pageInfo(); L.ok('facebook', 'Token health check thik ache'); subscribeAll().catch(() => {}); } catch (e) { L.error('facebook', 'Token health check fail: ' + e.message); N.admin('system', 'Facebook token e shomossha', e.message); }
   }, 6 * 3600e3);
-  // daily report 22:00 Dhaka
+  // daily report 22:00 Dhaka (+ weekly report on Saturday)
   let lastDay = '';
   setInterval(async () => {
     const d = new Date(Date.now() + 6 * 3600e3);
     const day = d.toISOString().slice(0, 10);
-    if (d.getUTCHours() !== 22 || lastDay === day || !S.get('daily_report')) return;
+    if (d.getUTCHours() !== 22 || lastDay === day) return;
     lastDay = day;
-    const start = new Date(Date.parse(day + 'T00:00:00Z') - 6 * 3600e3);
-    const rows = await col('orders').aggregate([{ $match: { test: { $ne: true }, createdAt: { $gte: start } } }, { $group: { _id: '$status', n: { $sum: 1 }, sum: { $sum: '$total' } } }]).toArray();
-    const g = (s) => rows.find((x) => x._id === s) || { n: 0, sum: 0 };
-    const total = rows.filter((x) => x._id !== 'cancelled').reduce((a, x) => a + x.sum, 0);
-    N.admin('daily_report', `Ajker report (${day})`, `Notun order: ${rows.reduce((a, x) => a + x.n, 0)}\nBikri (cancel bade): ${O.money(total)}\nConfirmed ${g('confirmed').n}, Shipped ${g('shipped').n}, Delivered ${g('delivered').n}, Cancelled ${g('cancelled').n}`);
+    const R = require('./core/reports');
+    if (S.get('daily_report')) N.admin('daily_report', `Ajker report (${day})`, R.text(await R.summary(1), 'Ajker hishab'));
+    if (d.getUTCDay() === 6 && S.get('weekly_report')) N.admin('daily_report', `7 diner report (${day})`, R.text(await R.summary(7), '7 diner hishab'));
   }, 60000);
 }
 
