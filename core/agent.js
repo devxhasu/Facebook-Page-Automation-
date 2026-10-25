@@ -9,6 +9,7 @@ const O = require('./orders');
 const N = require('./notify');
 const M = require('./media');
 const Pages = require('./pages');
+const Selling = require('./selling');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const modTools = new Map();
@@ -18,12 +19,14 @@ const registerTool = (def, handler) => modTools.set(def.function.name, { def, ha
 const fbOut = (psid) => ({
   typing: () => fb.typing(psid, true).catch(() => {}),
   text: (t) => fb.text(psid, t),
+  quick: (t, r) => fb.textQR(psid, t, r),
   image: (u) => fb.image(psid, u),
   carousel: (els) => fb.carousel(psid, els),
 });
 const testOut = (buf) => ({
   typing: async () => {},
   text: async (t) => { buf.push({ type: 'text', text: t }); },
+  quick: async (t, r) => { buf.push({ type: 'text', text: t, quick: r }); },
   image: async (u) => { buf.push({ type: 'image', url: u }); },
   carousel: async (els) => { buf.push({ type: 'carousel', items: els.map((e) => ({ title: e.title, subtitle: e.subtitle, image: e.image_url })) }); },
 });
@@ -56,8 +59,9 @@ async function getCustomer(ctx) {
   return c;
 }
 
-async function sendRaw(ctx, text) {
+async function sendRaw(ctx, text, replies) {
   await col('messages').insertOne({ psid: ctx.psid, role: 'assistant', text, t: Date.now() });
+  if (replies && replies.length && ctx.out.quick) { try { await ctx.out.quick(text, replies); return; } catch (e) { L.warn('agent', 'Quick reply pathano jayni, normal message dichhi: ' + e.message); } }
   await ctx.out.text(text);
 }
 async function sendHuman(ctx, text) {
@@ -151,12 +155,12 @@ async function ownOrder(c, id) {
 
 async function showProducts(ctx, codes) {
   const ps = [];
-  for (const code of (codes || []).slice(0, 4)) { const p = await P.get(code); if (p && p.active) ps.push(p); }
+  for (const code of (codes || []).slice(0, 10)) { const p = await P.get(code); if (p && p.active) ps.push(p); }
   if (!ps.length) return { error: 'no_valid_products' };
   const url = (p) => { const u = M.abs((p.images || [])[0]); return u && !u.startsWith('/') ? u : ''; };
   let sent = 0;
   if (ps.length > 1) {
-    const els = ps.map((p) => ({ title: `${p.name}${p.variant ? ' - ' + p.variant : ''}`.slice(0, 80), subtitle: `${O.money(p.price)} | ${p.code}`, image_url: url(p) || undefined, buttons: [{ type: 'postback', title: 'Eta nibo', payload: 'PICK:' + p.code }] }));
+    const els = ps.map((p, i) => ({ title: `${i + 1}. ${p.name}${p.variant ? ' - ' + p.variant : ''}`.slice(0, 80), subtitle: `${O.money(p.price)}${(p.options || []).length ? ' | ' + (p.options || []).map((o) => o.name + ': ' + o.values.join('/')).join(', ') : ''}`.slice(0, 80), image_url: url(p) || undefined, buttons: [{ type: 'postback', title: 'Eta nibo', payload: 'PICK:' + p.code }] }));
     await ctx.out.carousel(els); sent = els.length;
   } else {
     for (const im of (ps[0].images || []).slice(0, 3)) { const u = M.abs(im); if (u && !u.startsWith('/')) { await ctx.out.image(u); sent++; } }
@@ -187,6 +191,18 @@ const FIX = {
   daily_limit: () => 'Daily order limit reached. Say the admin will contact them (request_human).',
 };
 const fixFor = (res) => (res && res.error && FIX[res.error] ? { ...res, what_to_do: FIX[res.error](res) } : res);
+
+// builds the order preview, stores the draft and sends the (single) preview message
+async function previewOrder(ctx, c, items, opts) {
+  const r = await O.calc(c, items, opts);
+  if (r.error) return r;
+  c.draft = { items, opts, at: Date.now() };
+  c.interest = { codes: items.map((i) => i.code), at: Date.now() };
+  c.pay_stage = null;
+  await col('customers').updateOne({ psid: c.psid }, { $set: { draft: c.draft, interest: c.interest, pay_stage: null, zone_q: false } });
+  await sendRaw(ctx, O.previewText(r, c), ['Confirm', 'Change korbo']);
+  return r;
+}
 
 async function exec(ctx, name, a, c) {
   switch (name) {
@@ -224,14 +240,9 @@ async function exec(ctx, name, a, c) {
     case 'calc_order': {
       const items = (a.items || []).map((i) => ({ code: i.code, qty: i.qty || 1, options: i.options || {} }));
       const opts = { inside_dhaka: !!a.inside_dhaka, coupon: a.coupon || '', extra_discount_pct: a.extra_discount_pct || 0 };
-      const r = await O.calc(c, items, opts);
+      const r = await previewOrder(ctx, c, items, opts);
       if (r.error) return r;
-      c.draft = { items, opts, at: Date.now() };
-      c.interest = { codes: items.map((i) => i.code), at: Date.now() };
-      await col('customers').updateOne({ psid: c.psid }, { $set: { draft: c.draft, interest: c.interest } });
-      await sendRaw(ctx, O.previewText(r, c));
       const hint = S.get('upsell_on') && r.free_delivery_gap > 0 && r.free_delivery_gap <= 600 ? `Customer needs only ${r.free_delivery_gap} tk more for free delivery; you may mention it once.` : undefined;
-      await col('customers').updateOne({ psid: c.psid }, { $set: { pay_stage: null } }); c.pay_stage = null;
       return { preview_sent: true, note: 'Preview already asks the customer to confirm. Write nothing more.', total: r.total, delivery: r.delivery, discount: r.discount, payment_options: r.modes, hint };
     }
     case 'place_order': {
@@ -296,15 +307,22 @@ async function exec(ctx, name, a, c) {
 // ---------- prompt ----------
 async function nextStep(c, open) {
   const pay = (open || []).find((o) => o.status === 'awaiting_payment');
-  if (pay) return `Order #${pay.id} waits for the advance payment of ${pay.required_now} tk (the amount is already known, do NOT ask for it). Collect only the TrxID and the sender number, then call submit_payment. Payment details were already sent; do not resend them.`;
+  if (pay) return `Order #${pay.id} waits for the advance payment of ${pay.required_now} tk (the amount is already known, do NOT ask for it). Collect only the TrxID (or sender number / its last 4 digits), then call submit_payment. Payment details were already sent; do not resend them.`;
   if ((open || []).some((o) => o.status === 'payment_review')) return 'Payment is with the admin for verification. Reassure the customer in one line; do not ask for payment again.';
   if (c.pay_stage === 'method') return 'The customer must now pick the payment method (bKash/Nagad/Rocket). The server handles it; if they ask anything else, answer in one line and repeat that question.';
-  if (c.draft) return 'The order preview was sent. Wait for the customer to confirm and choose the payment option; then call place_order. Do not recalculate unless they change something.';
-  const miss = [!c.name && 'name', !c.phone && 'phone number', !c.address && 'full address'].filter(Boolean);
-  if (c.interest && miss.length) return `If the customer has chosen a product and its options, ask for the missing: ${miss.join(' and ')} (ask in one message).`;
-  return 'Help the customer find a product and move gently towards choosing options, then phone and address.';
+  if (c.draft) return 'The order preview was sent. Wait for the customer to confirm; the server handles confirmation and payment. If they want a change, use change_order_items logic: call calc_order again with the new items. Do not recalculate otherwise.';
+  if (c.sel) {
+    const p = await P.get(c.sel.code);
+    const o = p && (p.options || []).find((x) => !c.sel.options[x.name]);
+    const chosen = `${p ? p.name + (p.variant ? ' (' + p.variant + ')' : '') : c.sel.code} [code ${c.sel.code}], options ${JSON.stringify(c.sel.options)}, qty ${c.sel.qty}`;
+    if (o) return `The customer chose ${chosen}. Still needed: "${o.name}" (${o.values.join(', ')}). Answer any question in one short line, then ask only for ${o.name}.`;
+    const need = [!c.name && 'name', !c.phone && 'phone number', !c.address && 'full address'].filter(Boolean);
+    if (need.length) return `The customer chose ${chosen}. They want to buy. Ask ONLY for the missing ${need.join(', ')} in ONE short message. When they give details, call update_customer; the server then sends the preview itself, so write nothing more.`;
+    return `The customer chose ${chosen} and all details are known. Call calc_order now with exactly this item and inside_dhaka decided from the address (ask only if truly unclear).`;
+  }
+  if ((c.pick_list || []).length) return 'A product list with photos was shown. Ask which one they want ("Eta nibo" button or a number). Do not ask for phone or address yet.';
+  return 'Help the customer find a product (search_products, show_products). Do NOT ask for name, phone or address until the customer has chosen a product and its options and clearly wants to buy.';
 }
-
 
 async function buildSystem(c, isFirst, voice, pageName, hits) {
   const bundles = await col('bundles').find({ active: { $ne: false } }).toArray();
@@ -317,7 +335,7 @@ async function buildSystem(c, isFirst, voice, pageName, hits) {
   return `You are ${S.get('persona_name')}, chatting for the Facebook page "${pageName || S.get('page_name') || 'our shop'}", an online shop in Bangladesh. Write exactly like a real, polite shopkeeper on Messenger. Tone: ${S.get('tone')}.
 
 STYLE
-- Very short, soft and polite messages: 1 line (max 2) each, at most 2 messages in total. Warm words like "ji", "apu/bhaiya" are fine. No lists, no bold, no headings, no "Dear customer", no "Thank you for contacting us".
+- Very short, soft and polite messages: 1 line (max 2) each, at most 2 messages in total. Use "ji" for politeness. NEVER call the customer "apu", "apa", "bhaiya", "sir" or "madam" (you do not know their gender); no pet names at all. No lists, no bold, no headings, no "Dear customer", no "Thank you for contacting us".
 - Reply in the customer's language and script: Banglish if they type Banglish, Bangla script if they type Bangla, English only if they write English. Never Hindi/Urdu. Never suggest other websites or shops.
 - If the customer names a product or category ("T Shirt lagbe"), call search_products at once and show_products; do not ask general questions first. If nothing matches, softly say it is not available now. ${emoji}
 - Ask only ONE question at a time. Never ask for anything listed under KNOWN. Never repeat what was already said.
@@ -340,7 +358,7 @@ SELLING (be a warm, smart shopkeeper, never pushy)
 - Customer silent or unsure: end with a light, friendly line, not a question loop.
 
 ORDER FLOW
-1. Find product -> collect missing options and quantity -> collect the customer's name, phone and full address (ask ALL missing ones in ONE short message) -> call update_customer when you get them. If a detail looks wrong or incomplete (short/fake phone, address without area), ask again politely.
+1. Find product -> options and quantity -> ONLY after the customer chose a product and its options and wants to buy: collect the missing name, phone and full address (ONE short message) -> call update_customer. Never ask for these just because the customer showed interest or greeted. Follow NEXT STEP. If a detail looks wrong or incomplete (short/fake phone, address without area), ask again politely.
 2. Decide inside_dhaka from the address (ask only if truly unclear). Delivery: inside Dhaka ${S.get('delivery_inside')} tk, outside ${S.get('delivery_outside')} tk${S.num('free_delivery_min') ? `, free delivery above ${S.get('free_delivery_min')} tk` : ''}. Delivery time: ${S.get('delivery_time')}.
 3. Call calc_order. The server sends the order preview, which already asks the customer to confirm. Write NOTHING more after calc_order.
 4. The SERVER handles the rest by itself: confirmation, advance payment method (bKash/Nagad/Rocket), its number, and the TrxID. Never invent payment numbers or placeholders. If the customer asks something else meanwhile, answer in one short line and remind the next step.
@@ -403,7 +421,8 @@ function pickMethod(text, ms) {
   }
   return null;
 }
-const say = async (ctx, t) => { if (S.get('typing_delay') !== false) { await ctx.out.typing(); await sleep(700); } await sendRaw(ctx, t); return true; };
+const say = async (ctx, t, replies) => { if (S.get('typing_delay') !== false) { await ctx.out.typing(); await sleep(700); } await sendRaw(ctx, t, replies); return true; };
+const SH = { say: (ctx, t, r) => say(ctx, t, r), showProducts: (ctx, codes) => showProducts(ctx, codes), previewOrder: (ctx, c, items, opts) => previewOrder(ctx, c, items, opts) };
 const STATUS_TEXT = {
   pending: (o) => `Order #${o.id} admin er approval er opekkhay ache ji.`,
   awaiting_payment: (o) => `Order #${o.id} e ${O.money(o.required_now)} advance dile order confirm hobe ji.`,
@@ -479,15 +498,30 @@ async function fastPath(ctx, c, text) {
     const names = ms.map((m) => m.name);
     const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' ba ' + names[names.length - 1] : names[0] || 'bKash/Nagad';
     const extra = adv.length > 1 && first.mode === 'delivery_advance' ? ` (Chaile puro ${O.money(r.total)}-o dite paren)` : '';
-    return say(ctx, `Order confirm korte age ${O.money(first.pay_now)} advance dite hobe ji. ${list} kon ta e dibena?${extra}`);
+    return say(ctx, `Order confirm korte age ${O.money(first.pay_now)} advance dite hobe ji. ${list} kon ta e dibena?${extra}`, names.length > 1 ? names : undefined);
   }
+  // 5) guided selling: greeting, product picker, options, details
+  if (!awaiting && !review) return Selling.step(ctx, c, t, SH);
   return false;
 }
 
 // ---------- main ----------
+// a customer who comes to the inbox from a comment: remember which product(s) the comment was about
+async function applyCommentCtx(c) {
+  try {
+    if (c.sel || c.draft || (c.pick_list || []).length || String(c.psid).startsWith('TEST')) return;
+    const x = await col('comment_ctx').findOne({ psid: String(c.psid), used: { $ne: true }, at: { $gt: Date.now() - 7 * 86400e3 } });
+    if (!x || !(x.codes || []).length) return;
+    await col('comment_ctx').updateOne({ _id: x._id }, { $set: { used: true } });
+    if (x.codes.length === 1) { const set = { sel: { code: x.codes[0], options: {}, qty: 1, at: Date.now(), stage: 'options' }, interest: { codes: x.codes, at: Date.now() } }; Object.assign(c, set); await col('customers').updateOne({ psid: c.psid }, { $set: set }); }
+    else { const set = { pick_list: x.codes, pick_at: Date.now(), interest: { codes: x.codes, at: Date.now() } }; Object.assign(c, set); await col('customers').updateOne({ psid: c.psid }, { $set: set }); }
+  } catch (e) { L.warn('agent', 'Comment context lagano jayni: ' + e.message); }
+}
+
 async function handle(ctx, input) {
   const c = (ctx.customer = await getCustomer(ctx));
   const test = ctx.channel === 'test';
+  await applyCommentCtx(c);
   if (c.blocked && !test) return L.info('agent', 'Blocked customer, ignore: ' + c.psid);
 
   const save = (text) => col('messages').insertOne({ psid: c.psid, role: 'user', text, t: Date.now() });
@@ -521,7 +555,7 @@ async function handle(ctx, input) {
     try { const q = String(input.text || '').replace(/\[[^\]]*\]/g, '').trim().slice(0, 150); if (q.length > 1) hits = (await P.search(q, 4)).filter((p) => p.active !== false); } catch {}
     const msgs = [{ role: 'system', content: await buildSystem(c, isFirst, m.voice, ctx.page && ctx.page.name, hits) }, ...hist];
     const tools = allTools();
-    let finalText = '', silent = false;
+    let finalText = '', silent = false, saved = false;
     for (let i = 0; i < 7; i++) {
       const r = await AI.chat('text', msgs, tools);
       const msg = r.message;
@@ -532,6 +566,7 @@ async function handle(ctx, input) {
           try { args = JSON.parse(tc.function.arguments || '{}'); } catch {}
           try { res = fixFor(await exec(ctx, tc.function.name, args, c)); } catch (e) { L.error('tool', `${tc.function.name} fail: ${e.message}`, e); res = { error: 'tool_failed', detail: e.message }; }
           if (['calc_order', 'place_order', 'submit_payment'].includes(tc.function.name) && res && !res.error) silent = true;
+          if (tc.function.name === 'update_customer' && res && res.saved) saved = true;
           L.info('tool', `${tc.function.name} -> ${res && res.error ? 'error: ' + res.error : 'ok'}`);
           msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(res).slice(0, 3000) });
         }
@@ -540,7 +575,11 @@ async function handle(ctx, input) {
       finalText = String(msg.content || '').trim();
       break;
     }
+    // details complete and chosen product known: the server sends the preview itself (one clean message)
+    const ready = !c.draft && c.sel && c.phone && c.address && c.name && (await Selling.complete(c));
+    if (ready) silent = true;
     if (!silent) await sendHuman(ctx, finalText);
+    if (ready) await Selling.maybePreview(ctx, c, SH);
     L.ok('reply', `${c.name || c.fbname || c.psid}: reply pathano hoyeche`);
   } catch (e) {
     L.error('agent', 'Reply dite parini: ' + e.message, e);

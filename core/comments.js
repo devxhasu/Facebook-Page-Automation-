@@ -6,6 +6,7 @@ const AI = require('./ai');
 const fb = require('./facebook');
 const P = require('./products');
 const O = require('./orders');
+const N = require('./notify');
 
 let pageId = '';
 const setPageId = (id) => { pageId = String(id || ''); };
@@ -30,55 +31,82 @@ async function handle(v, page) {
   const key = `${v.post_id}:${from.id}`;
   if (await col('comments').findOne({ key, replied: true, createdAt: { $gt: new Date(Date.now() - 2 * 3600e3) } })) { L.info('comment', 'Skip: ei user ke ei post e 2 ghontar moddhe reply deya hoyeche'); return; }
 
+  const bn = /[ঀ-৿]/.test(text);
   let products = [];
   const link = await col('post_links').findOne({ post_id: String(v.post_id) });
   if (link) { const p = await P.get(link.product_code); if (p) products = [p]; }
-  if (!products.length) products = await P.search(text, 3);
+  if (!products.length) products = (await P.matchProducts(text, 3)).filter((p) => p.active !== false);
+  const inStock = products.filter((p) => p.stock > 0);
+  if (inStock.length) products = inStock;
 
-  const priceRule = S.get('comment_price_public') ? 'You may mention the price in the public reply.' : 'Do NOT mention any price in the public reply.';
-  const sys = `You write replies to Facebook post comments for the shop "${(page && page.name) || S.get('page_name') || 'our shop'}" in Bangladesh. Output ONLY JSON: {"intent":"price|order|info|spam|abusive|other","public_reply":"","private_reply":""}.
-intent "other" = ONLY emoji, a lone tag/mention, or clearly unrelated chat: leave both replies empty. Any real word or question ("ok", "nice", "price", "ache?", "details", "test") is NOT other: treat it as info/price and reply. spam/abusive: leave both empty.
-public_reply: one short human line (max 12 words), vary the wording, same language as the comment (Bangla, Banglish or English), say details are sent in inbox. ${priceRule} No hashtags.
-private_reply: 2-3 short lines, same language, greeting like a real person, product name and price and available options taken ONLY from PRODUCT DATA, then ask what size/quantity they want. If PRODUCT DATA is empty, ask which product they mean. Never invent anything. Almost no emoji.`;
-  let out;
-  try {
-    const r = await AI.chat('text', [{ role: 'system', content: sys }, { role: 'user', content: `COMMENT: ${text}\nPRODUCT DATA: ${JSON.stringify(products.map(P.brief))}` }]);
-    out = parseJson(r.message.content);
-  } catch (e) {
-    L.error('comment', 'Comment reply AI fail, simple reply dichhi: ' + e.message, e);
-    // no-AI fallback so a comment never goes unanswered
-    const wants = products.length || /price|dam|daam|koto|rate|lagbe|chai|available|ache|order|inbox|দাম|কত|লাগবে|চাই|আছে|অর্ডার|ইনবক্স/i.test(text);
-    if (!wants) return;
-    const pr = products[0];
-    out = { intent: 'price', public_reply: 'Details inbox e pathiyechi ji',
-      private_reply: pr ? `Assalamu alaikum. ${pr.name}${pr.variant ? ' (' + pr.variant + ')' : ''} er dam ${O.money(pr.price)}. Kon size/koyta lagbe ji?` : 'Assalamu alaikum. Kon product ta lagbe ji? Naam ba chobi pathaben.' };
+  // 1) is it a real customer? (AI only decides spam/abuse; real words are never ignored)
+  const hasWords = /[\p{L}\p{N}]{2,}/u.test(text);
+  if (!hasWords) { L.info('comment', 'Skip: shudhu emoji/tag'); return; }
+  let intent = /https?:\/\/|www\.|t\.me\/|wa\.me\/|\bearn\b.*\bmoney\b|click here/i.test(text) ? 'spam' : 'info';
+  if (intent !== 'spam') {
+    try {
+      const r = await AI.chat('text', [{ role: 'system', content: 'Classify a Facebook comment on a shop post. Output ONLY JSON {"intent":"customer|spam|abusive"}. customer = any question, interest, price/order/size ask, or a normal short word. spam = ads, links, promotions. abusive = insults or swearing.' }, { role: 'user', content: text }]);
+      const j = parseJson(r.message.content);
+      if (j && ['spam', 'abusive'].includes(j.intent)) intent = j.intent;
+    } catch (e) { L.warn('comment', 'Comment classify AI fail, customer dhore reply dichhi: ' + e.message); }
   }
-  if (!out) { L.warn('comment', 'AI JSON dilo na, skip'); return; }
-  L.info('comment', `AI bujhlo: ${out.intent}`);
-  if (out.intent === 'abusive' && S.get('comment_hide_abusive')) { fb.hideComment(cid).then(() => L.ok('comment', 'Abusive comment hide kora hoyeche')).catch((e) => L.warn('comment', e.message)); return; }
-  // a comment with real words is a possible customer: never ignore it silently
-  if (out.intent === 'other' && /[\p{L}\p{N}]{2,}/u.test(text) && !out.public_reply && !out.private_reply) {
-    const pr = products[0];
-    out = { intent: 'info', public_reply: 'Details inbox e pathiyechi ji', private_reply: pr ? `Assalamu alaikum. ${pr.name}${pr.variant ? ' (' + pr.variant + ')' : ''} er dam ${O.money(pr.price)}. Kon size/koyta lagbe ji?` : 'Assalamu alaikum. Kon product ta lagbe ji? Naam ba chobi pathaben.' };
-  }
-  if (['spam', 'abusive'].includes(out.intent) || (!out.public_reply && !out.private_reply)) { L.info('comment', `Skip (${out.intent}): ${text.slice(0, 40)}`); return; }
+  if (intent === 'abusive' && S.get('comment_hide_abusive')) { fb.hideComment(cid).then(() => L.ok('comment', 'Abusive comment hide kora hoyeche')).catch((e) => L.warn('comment', e.message)); return; }
+  if (intent !== 'info') { L.info('comment', `Skip (${intent}): ${text.slice(0, 40)}`); return; }
   await col('comments').updateOne({ _id: cid }, { $set: { key, replied: true } });
 
+  // 2) texts are built from the database, never invented by the AI
+  const pText = privateText(products, bn);
   const min = Math.max(0, S.num('comment_delay_min')), max = Math.max(min, S.num('comment_delay_max'));
   const wait = (min + Math.random() * (max - min)) * 1000;
-  L.info('comment', `Comment: "${text.slice(0, 50)}" (${out.intent}), ${Math.round(wait / 1000)}s por reply debo`);
+  L.info('comment', `Comment: "${text.slice(0, 50)}" (${products.length} product), ${Math.round(wait / 1000)}s por reply debo`);
   setTimeout(async () => {
-    if (S.get('comment_public_reply') && out.public_reply) {
-      try { await fb.replyComment(cid, out.public_reply); L.ok('comment', 'Public reply gelo'); } catch (e) { L.error('comment', 'Public reply fail: ' + e.message, e); }
-    }
-    if (S.get('comment_private_reply') && out.private_reply) {
+    let sent = false;
+    // private (inbox) message first, so the public line never claims something that did not happen
+    if (S.get('comment_private_reply')) {
       try {
-        await fb.privateReply(cid, out.private_reply);
-        await col('messages').insertOne({ psid: String(from.id), role: 'assistant', text: out.private_reply, t: Date.now() });
+        const j = await fb.privateReply(cid, pText);
+        sent = true;
+        const psids = [...new Set([String(from.id), j && j.recipient_id ? String(j.recipient_id) : ''].filter(Boolean))];
+        for (const id of psids) {
+          await col('messages').insertOne({ psid: id, role: 'assistant', text: pText, t: Date.now() }).catch(() => {});
+          await col('comment_ctx').insertOne({ psid: id, codes: products.map((p) => p.code), at: Date.now(), used: false, text: text.slice(0, 200) }).catch(() => {});
+        }
         L.ok('comment', 'Inbox e private reply gelo');
-      } catch (e) { L.error('comment', 'Private reply fail (comment 7 diner purano ba permission nai?): ' + e.message, e); }
+      } catch (e) {
+        L.error('comment', 'Private reply fail (comment 7 diner purano ba permission nai?): ' + e.message + (e.hint ? ' | ' + e.hint : ''), e);
+        N.admin('attention', 'Comment e inbox message jayni', `"${text.slice(0, 80)}" (${from.name || from.id})\n${String(e.message).slice(0, 120)}\nPost e giye nijer hate reply din.`);
+      }
+    }
+    if (S.get('comment_public_reply')) {
+      try { await fb.replyComment(cid, publicText(products, sent, bn)); L.ok('comment', 'Public reply gelo'); }
+      catch (e) { L.error('comment', 'Public reply fail: ' + e.message + (e.hint ? ' | ' + e.hint : ''), e); }
     }
   }, wait);
+}
+
+// ---------- reply texts ----------
+const nameOf = (p) => `${p.name}${p.variant ? ' (' + p.variant + ')' : ''}`;
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+function privateText(products, bn) {
+  const hi = bn ? 'আসসালামু আলাইকুম।' : 'Assalamu alaikum.';
+  if (!products.length) return bn ? `${hi} কোন প্রোডাক্টটি লাগবে জি? নাম বা ছবি পাঠান।` : `${hi} Kon product ta lagbe ji? Naam ba chobi pathaben.`;
+  if (products.length === 1) {
+    const p = products[0];
+    if (p.stock <= 0) return bn ? `${hi} ${nameOf(p)} এখন স্টকে নেই জি। অন্য ডিজাইন দেখাবো?` : `${hi} ${nameOf(p)} ekhon stock e nai ji. Onno design dekhabo?`;
+    const o = p.options || [];
+    const optTxt = o.length ? ' ' + o.map((x) => `${x.name}: ${x.values.join('/')}`).join(', ') + '.' : '';
+    const ask = o.length ? (bn ? `কোন ${o[0].name} লাগবে জি?` : `Kon ${o[0].name} lagbe ji?`) : (bn ? 'কয়টা লাগবে জি?' : 'Koyta lagbe ji?');
+    return bn ? `${hi} ${nameOf(p)} এর দাম ${Math.round(p.price)} টাকা।${optTxt} ${ask}` : `${hi} ${nameOf(p)} er dam ${O.money(p.price)}.${optTxt} ${ask}`;
+  }
+  const lines = products.slice(0, 3).map((p, i) => `${i + 1}) ${nameOf(p)} - ${O.money(p.price)}`).join('\n');
+  return bn ? `${hi} এগুলো আছে জি:\n${lines}\nকোনটা নিবেন? নাম্বার লিখুন।` : `${hi} Ei gulo ache ji:\n${lines}\nKon ta nibo? Number likhun.`;
+}
+function publicText(products, sent, bn) {
+  if (sent) {
+    if (S.get('comment_price_public') && products.length === 1 && products[0].stock > 0) return bn ? `${nameOf(products[0])} ${Math.round(products[0].price)} টাকা। বিস্তারিত ইনবক্সে পাঠিয়েছি জি` : `${nameOf(products[0])} ${O.money(products[0].price)}. Details inbox e pathiyechi ji`;
+    return pick(bn ? ['ইনবক্সে ডিটেইলস পাঠিয়েছি জি', 'জি, ইনবক্স চেক করুন, পাঠিয়ে দিয়েছি'] : ['Inbox e details pathiyechi ji', 'Ji, inbox check korun, pathiyechi', 'Details inbox e pathiyechi, dekhben ji']);
+  }
+  return pick(bn ? ['ডিটেইলস জানতে ইনবক্সে একটা মেসেজ দিন জি', 'ইনবক্সে মেসেজ করুন জি, জানিয়ে দিচ্ছি'] : ['Details jante inbox e ekta message din ji', 'Inbox e message korun ji, details diye dibo']);
 }
 
 module.exports = { handle, setPageId };

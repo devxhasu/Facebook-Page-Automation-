@@ -14,6 +14,7 @@ function hintFor(code, sub, msg) {
   const m = String(msg || '');
   if (code === 190) return 'Page Token vul/meyad shesh. Notun Page Access Token boshan.';
   if (code === 2018278 || sub === 2018278 || /outside of allowed window|24.?hour/i.test(m)) return 'Facebook er 24 ghonta niyom: customer er last message er 24 ghonta pore reply deya jay na.';
+  if (code === 100 && sub === 33) return 'Comment/object e likhar permission nai ba object paoa jachhe na. Notun Page token baniye pages_manage_engagement + pages_messaging + pages_read_user_content shoho din (ar token User na, Page token hote hobe). Private reply 7 din-er purano ba onno user-er comment e jay na.';
   if (code === 10 || code === 200 || /permission/i.test(m)) return 'pages_messaging permission nai. Facebook App e Messenger product + pages_messaging (Advanced Access/App Review) lagbe, ar App Live mode e thakte hobe.';
   if (code === 100 && /No matching user|does not exist|cannot be loaded/i.test(m)) return 'App ekhono Development mode e: shudhu App er Admin/Developer/Tester role er account theke message dile reply jabe. Shobar jonno App ke Live korun.';
   if (code === 551 || sub === 1545041) return 'Ei user ekhon message pabe na (block korechhe ba available na).';
@@ -53,6 +54,7 @@ const send = async (psid, message) => {
   }
 };
 const text = (psid, t) => send(psid, { text: String(t).slice(0, 1900) });
+const textQR = (psid, t, replies) => send(psid, { text: String(t).slice(0, 1900), quick_replies: replies.slice(0, 13).map((r) => ({ content_type: 'text', title: String(r).slice(0, 20), payload: 'QR:' + String(r).slice(0, 60) })) });
 const image = (psid, url) => send(psid, { attachment: { type: 'image', payload: { url, is_reusable: false } } });
 const carousel = (psid, elements) => send(psid, { attachment: { type: 'template', payload: { template_type: 'generic', elements: elements.slice(0, 10) } } });
 const typing = (psid, on = true) => graph('me/messages', { method: 'POST', body: { recipient: { id: psid }, sender_action: on ? 'typing_on' : 'typing_off' } });
@@ -106,4 +108,4 @@ async function debugToken() {
   return j.data || null;
 }
 
-module.exports = { longLived, pagesFromUserToken, ensureSubscribed, runWith, status, hooks, graph, text, image, carousel, typing, seen, privateReply, replyComment, hideComment, pageInfo, userName, subscribe, subscribed, debugToken };
+module.exports = { textQR, longLived, pagesFromUserToken, ensureSubscribed, runWith, status, hooks, graph, text, image, carousel, typing, seen, privateReply, replyComment, hideComment, pageInfo, userName, subscribe, subscribed, debugToken };

@@ -173,7 +173,7 @@ async function createOrder(customer, mode, { test = false } = {}) {
   await col('orders').insertOne(o);
   const prefs = {};
   for (const l of c.lines) for (const [k, v] of Object.entries(l.options || {})) prefs[k] = v;
-  await col('customers').updateOne({ psid: customer.psid }, { $set: { draft: null, lastOrderAt: new Date(), ...(Object.keys(prefs).length ? { prefs: { ...(customer.prefs || {}), ...prefs } } : {}) } });
+  await col('customers').updateOne({ psid: customer.psid }, { $set: { draft: null, sel: null, pick_list: null, zone_q: false, lastOrderAt: new Date(), ...(Object.keys(prefs).length ? { prefs: { ...(customer.prefs || {}), ...prefs } } : {}) } });
   customer.draft = null;
   if (c.coupon) await col('coupons').updateOne({ code: c.coupon }, { $inc: { uses: 1 } });
   if (status === 'confirmed') await takeStock(o);

@@ -69,7 +69,7 @@ async function adjustStock(code, delta) {
   return get(code);
 }
 
-async function search(q, limit = 6, o = {}) {
+async function searchScored(q, limit = 6, o = {}) {
   const nq = norm(q);
   const tokens = nq.split(' ').filter((t) => t.length > 1);
   const out = [];
@@ -85,7 +85,22 @@ async function search(q, limit = 6, o = {}) {
     for (const t of tokens) if (hay.includes(t)) s++;
     if (s > 0) out.push({ p, s });
   }
-  return out.sort((a, b) => b.s - a.s).slice(0, limit).map((x) => x.p);
+  return out.sort((a, b) => b.s - a.s).slice(0, limit);
+}
+const search = async (q, limit = 6, o = {}) => (await searchScored(q, limit, o)).map((x) => x.p);
+
+// words that are only chatter, never a product name
+const CHATTER = new Set('lagbe laagbe lagche chai chay chaichi den dao dite dekhan dekhao dekhaben ache ase achhe ki kro koro korun kore er ta ti ke ki ei eta oi ota ami amar amr apni apnar dam daam price koto kot rate available stock product products item items sell bikri kothay kobe nibo nite nilam pabo pawa jabe hobe hoy hobe jonno jonne please pls plz hi hello hey salam assalamualaikum assalamu alaikum bhai vai apu apa sir madam admin inbox details detail info order korbo korte korechi'.split(' '));
+const cleanQuery = (t) => norm(t).split(' ').filter((w) => w.length > 1 && !CHATTER.has(w) && !/^\d+$/.test(w)).join(' ');
+// products a customer text clearly points to; ties (same name, many variants) are all returned
+async function matchProducts(text, max = 10) {
+  const q = cleanQuery(text);
+  if (!q) return [];
+  const sc = await searchScored(q, 30);
+  if (!sc.length) return [];
+  const top = sc[0].s;
+  const strong = sc.filter((x) => x.s >= top);
+  return strong.slice(0, max).map((x) => x.p);
 }
 
 const brief = (p) => ({
@@ -96,4 +111,4 @@ const brief = (p) => ({
   has_photo: (p.images || []).length > 0,
 });
 
-module.exports = { all, get, save, remove, search, brief, adjustStock, bust, parseOptions, norm };
+module.exports = { matchProducts, cleanQuery, searchScored, all, get, save, remove, search, brief, adjustStock, bust, parseOptions, norm };
