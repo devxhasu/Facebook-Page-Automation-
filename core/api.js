@@ -306,8 +306,10 @@ r.post('/notifications/read', wrap(async (q, s) => { await col('notifications').
 
 // ----- logs -----
 r.get('/logs', wrap(async (q, s) => {
-  const lim = Math.min(500, Number(q.query.limit) || 200);
-  const rows = await col('logs').find({}).sort({ t: -1 }).limit(lim).toArray();
+  const lim = Math.min(1000, Number(q.query.limit) || 200);
+  const f = {};
+  if (Number(q.query.before)) f.t = { $lt: Number(q.query.before) };
+  const rows = await col('logs').find(f).sort({ t: -1 }).limit(lim).toArray();
   s.json(rows.reverse().map((x) => ({ t: x.t, type: x.type, level: x.level, msg: x.msg, meta: x.meta })));
 }));
 r.delete('/logs', wrap(async (q, s) => { await L.clear(); s.json({ ok: true }); }));

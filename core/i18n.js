@@ -9,7 +9,7 @@ function add(dict) { for (const [k, v] of Object.entries(dict)) D[k] = v; }
 
 const BN = /[ঀ-৿]/;
 const EN_WORDS = new Set('the is are was i you we it to a an of for and or my me your do does did have has had want need like how much what when where which who why can could will would please price size color colour order delivery cash home address phone number name available stock buy get send show tell give hi hello thanks thank ok okay yes no not this that these those there here with without about from our shop product products pay payment money discount offer return exchange real original quality'.split(' '));
-const BL_MARK = new Set('ache achhe lagbe laagbe koto kot dam daam ki kemon kivabe kothay kobe nibo nite den dao dite korben korbo koren hobe hoy hoyeche amar amr ami apni apnar eta ota ei oi ta ti na hya ji jii bhai vai apu thik thikache ekta dui tin char pabo pawa jabe pathan pathao dekhan dekhao dekhaben bolen bolun bolo jonno er ke theke diye niye moddhe baire vitore'.split(' '));
+const BL_MARK = new Set('ache achhe lagbe laagbe koto kot dam daam ki kemon kivabe kothay kobe nibo nite den dao dite korben korbo koren hobe hoy hoyeche amar amr ami apni apnar eta ota ei oi ta ti na hya jii bhai vai apu thik thikache ekta dui tin char pabo pawa jabe pathan pathao dekhan dekhao dekhaben bolen bolun bolo jonno er ke theke diye niye moddhe baire vitore'.split(' '));
 
 // what language is this customer writing in? 'bn' | 'en' | 'bl' | '' (unsure)
 function detect(text) {
@@ -39,13 +39,30 @@ function langOf(c) {
 }
 const LANG_NAME = { bn: 'Bangla (Bengali script)', en: 'English', bl: 'Banglish (Bangla written in English letters, mixed with common English words)' };
 
+// "ji" in every sentence sounds fake: keep at most one, and only some of the time
+const FILLER = /(?:^|(?<=[.!?।]\s))(?:[^.!?।\n]*\b(?:kichu|kono|aro|ar|onno)\b[^.!?।\n]*\b(?:dorkar|proyojon|lagle|lagbe|jante chaile|shahajjo|sahajo|help)\b[^.!?।\n]*\b(?:janaben|janan|bolben|bolun|janiye|jiggesh|jigges)\b[^.!?।\n]*|[^.!?।\n]*\b(?:kivabe|kibhabe)\b[^.!?।\n]*\b(?:sahajo|shahajjo|help)\b[^.!?।\n]*|[^.!?।\n]*\bhow (?:can|may) i (?:help|assist)\b[^.!?।\n]*|[^.!?।\n]*\b(?:feel free|let me know if)\b[^.!?।\n]*)[.!?।]?\s*$/i;
+function dropFiller(t) {
+  const parts = t.split(/(?<=[.!?।])\s+/);
+  if (FILLER.test(parts[parts.length - 1])) { if (parts.length > 1) parts.pop(); else return /[a-z]/i.test(t) ? 'Bolun, ki lagbe?' : t; }
+  return parts.join(' ');
+}
+function soften(s) {
+  let t = dropFiller(String(s || ''));
+  if (!/(\bji+\b|জি)/i.test(t)) return t;
+  let kept = false;
+  const keep = Math.random() < 0.4;
+  t = t.replace(/(^|[.!?।]\s+)(ji|jii),?\s+/gi, '$1');
+  t = t.replace(/(\s)(ji+|জি)(?=[\s,.!?।]|$)/gi, (m) => { if (!kept && keep) { kept = true; return m; } return ''; });
+  return t.replace(/[ \t]+([,.!?।])/g, '$1').replace(/[ \t]{2,}/g, ' ');
+}
 const pick = (a) => (Array.isArray(a) ? a[Math.floor(Math.random() * a.length)] : a);
 function t(key, c, vars = {}) {
   const e = D[key];
   if (!e) return key;
   const l = langOf(c);
   const s = pick(e[l] != null ? e[l] : e.bl);
-  return String(s).replace(/\{(\w+)\}/g, (m, k) => (vars[k] == null ? '' : vars[k]));
+  const out = String(s).replace(/\{(\w+)\}/g, (m, k) => (vars[k] == null ? '' : vars[k]));
+  return l === 'en' ? out : soften(out);
 }
 // all variants of a key in every language (to build regexes / compare button labels)
 const variants = (key) => { const e = D[key] || {}; return [].concat(e.bl || [], e.bn || [], e.en || []); };
@@ -58,50 +75,50 @@ const list = (arr, c) => { const a = arr.filter(Boolean); if (a.length < 2) retu
 
 // ---------------- base texts ----------------
 add({
-  'g.salam': { bl: 'Walaikum assalam ji', bn: 'ওয়ালাইকুম আসসালাম জি', en: 'Walaikum assalam' },
+  'g.salam': { bl: 'Walaikum assalam', bn: 'ওয়ালাইকুম আসসালাম', en: 'Walaikum assalam' },
   'g.assalam': { bl: 'Assalamu alaikum', bn: 'আসসালামু আলাইকুম', en: 'Assalamu alaikum' },
-  'g.hello': { bl: 'Hello ji', bn: 'হ্যালো জি', en: 'Hello' },
+  'g.hello': { bl: 'Hello', bn: 'হ্যালো', en: 'Hello' },
   'g.fine': { bl: ', alhamdulillah bhalo', bn: ', আলহামদুলিল্লাহ ভালো', en: ', doing well' },
   'g.new': {
-    bl: ['{shop} e shagotom! Ki khujchhen, bolun ji.', '{shop} e shagotom! Apni ki dekhte chan ji?', 'Shagotom {shop} e! Kon product ta lagbe, bolun ji.'],
-    bn: ['{shop} এ স্বাগতম! কী খুঁজছেন, বলুন জি।', '{shop} এ স্বাগতম! আপনি কী দেখতে চান জি?', 'স্বাগতম {shop} এ! কোন প্রোডাক্টটা লাগবে বলুন জি।'],
+    bl: ['{shop} e shagotom! Ki khujchhen, bolun.', '{shop} e shagotom! Apni ki dekhte chan?', 'Shagotom {shop} e! Kon product ta lagbe, bolun.'],
+    bn: ['{shop} এ স্বাগতম! কী খুঁজছেন, বলুন।', '{shop} এ স্বাগতম! আপনি কী দেখতে চান?', 'স্বাগতম {shop} এ! কোন প্রোডাক্টটা লাগবে বলুন।'],
     en: ['Welcome to {shop}! What are you looking for?', 'Welcome to {shop}! What would you like to see?'],
   },
   'g.back': {
-    bl: ['Abar {shop} e shagotom! Ki lagbe bolun ji.', 'Abar peye bhalo laglo ji! Ki lagbe?'],
-    bn: ['আবার {shop} এ স্বাগতম! কী লাগবে বলুন জি।', 'আবার পেয়ে ভালো লাগলো জি! কী লাগবে?'],
+    bl: ['Abar {shop} e shagotom! Ki lagbe bolun.', 'Abar peye bhalo laglo! Ki lagbe?'],
+    bn: ['আবার {shop} এ স্বাগতম! কী লাগবে বলুন।', 'আবার পেয়ে ভালো লাগলো! কী লাগবে?'],
     en: ['Welcome back to {shop}! What do you need?', 'Good to see you again! What can I get you?'],
   },
-  'g.recent': { bl: ['Bolun ji, ki lagbe?', 'Ji bolun, ki dekhabo?'], bn: ['বলুন জি, কী লাগবে?', 'জি বলুন, কী দেখাবো?'], en: ['Tell me, what do you need?', 'Sure, what can I show you?'] },
+  'g.recent': { bl: ['Bolun, ki lagbe?', 'Bolun, ki dekhabo?'], bn: ['বলুন, কী লাগবে?', 'জি বলুন, কী দেখাবো?'], en: ['Tell me, what do you need?', 'Sure, what can I show you?'] },
 
   'need.name': { bl: 'naam', bn: 'নাম', en: 'name' },
   'need.phone': { bl: 'phone number', bn: 'ফোন নাম্বার', en: 'phone number' },
   'need.address': { bl: 'puro address', bn: 'পুরো ঠিকানা', en: 'full address' },
 
-  's.oos': { bl: 'Ji, {name} ekhon stock e nai. Onno kichu dekhabo?', bn: 'জি, {name} এখন স্টকে নেই। অন্য কিছু দেখাবো?', en: 'Sorry, {name} is out of stock right now. Shall I show you something else?' },
+  's.oos': { bl: '{name} ekhon stock e nai. Onno kichu dekhabo?', bn: '{name} এখন স্টকে নেই। অন্য কিছু দেখাবো?', en: 'Sorry, {name} is out of stock right now. Shall I show you something else?' },
   's.low': { bl: ' Matro {n} ta baki ache.', bn: ' মাত্র {n}টা বাকি আছে।', en: ' Only {n} left.' },
-  's.first': { bl: 'Ji, {name}, {price}.{low} {opt} ki nibo?', bn: 'জি, {name}, {price}।{low} কোন {opt} নিবেন?', en: '{name} is {price}.{low} Which {opt} would you like?' },
+  's.first': { bl: '{name}, {price}.{low} {opt} ki nibo?', bn: '{name}, {price}।{low} কোন {opt} নিবেন?', en: '{name} is {price}.{low} Which {opt} would you like?' },
   's.next': {
-    bl: ['Darun. {opt} ki nibo?', 'Thik ache ji. {opt} ta bolun?', 'Bujhlam ji. {opt} ki hobe?'],
-    bn: ['দারুণ। কোন {opt} নিবেন?', 'ঠিক আছে জি। {opt} টা বলুন?'],
+    bl: ['Darun. {opt} ki nibo?', 'Thik ache. {opt} ta bolun?', 'Bujhlam. {opt} ki hobe?'],
+    bn: ['দারুণ। কোন {opt} নিবেন?', 'ঠিক আছে। {opt} টা বলুন?'],
     en: ['Great. Which {opt}?', 'Got it. Which {opt} would you like?'],
   },
   's.details': {
-    bl: ['Darun ji! {summary}. Nite apnar {need} ek sathe din ji.', 'Perfect ji! {summary}. Order korte apnar {need} ek sathe likhe din.'],
-    bn: ['দারুণ জি! {summary}। নিতে আপনার {need} একসাথে দিন জি।', 'পারফেক্ট জি! {summary}। অর্ডার করতে আপনার {need} একসাথে লিখে দিন।'],
+    bl: ['Darun! {summary}. Nite apnar {need} ek sathe din.', 'Perfect! {summary}. Order korte apnar {need} ek sathe likhe din.'],
+    bn: ['দারুণ! {summary}। নিতে আপনার {need} একসাথে দিন।', 'পারফেক্ট! {summary}। অর্ডার করতে আপনার {need} একসাথে লিখে দিন।'],
     en: ['Great! {summary}. To place the order, please send your {need} in one message.', 'Perfect! {summary}. Please send your {need} together so I can place it.'],
   },
-  's.same_addr': { bl: 'Darun ji! {summary}. Ager moto {phone}, {address} e pathabo?', bn: 'দারুণ জি! {summary}। আগের মতো {phone}, {address} এ পাঠাবো?', en: 'Great! {summary}. Send it to the same {phone}, {address} as before?' },
+  's.same_addr': { bl: 'Darun! {summary}. Ager moto {phone}, {address} e pathabo?', bn: 'দারুণ! {summary}। আগের মতো {phone}, {address} এ পাঠাবো?', en: 'Great! {summary}. Send it to the same {phone}, {address} as before?' },
   'qr.addr_ok': { bl: 'Hya, ei ta', bn: 'হ্যাঁ, এটাই', en: 'Yes, same' },
   'qr.addr_new': { bl: 'Notun address', bn: 'নতুন ঠিকানা', en: 'New address' },
-  's.new_addr': { bl: 'Thik ache ji, notun address ta likhun.', bn: 'ঠিক আছে জি, নতুন ঠিকানাটা লিখুন।', en: 'Sure, please type the new address.' },
+  's.new_addr': { bl: 'Thik ache, notun address ta likhun.', bn: 'ঠিক আছে, নতুন ঠিকানাটা লিখুন।', en: 'Sure, please type the new address.' },
   's.zone': { bl: 'Apnar address ki Dhaka shohorer moddhe?', bn: 'আপনার ঠিকানা কি ঢাকা শহরের মধ্যে?', en: 'Is your address inside Dhaka city?' },
   'qr.zone_in': { bl: 'Dhaka-r moddhe', bn: 'ঢাকার মধ্যে', en: 'Inside Dhaka' },
   'qr.zone_out': { bl: 'Dhaka-r baire', bn: 'ঢাকার বাইরে', en: 'Outside Dhaka' },
-  's.cancel': { bl: 'Thik ache ji, onno kichu lagle bolben.', bn: 'ঠিক আছে জি, অন্য কিছু লাগলে বলবেন।', en: 'No problem. Tell me if you need anything else.' },
-  's.many': { bl: '{n} ta ache ji. Kon ta nibo? "Eta nibo" chapun ba number likhun.', bn: '{n}টা আছে জি। কোনটা নিবেন? "এটা নিবো" চাপুন বা নাম্বার লিখুন।', en: 'We have {n} options. Which one would you like? Tap "Eta nibo" or type the number.' },
-  's.bad_opt': { bl: 'Ei {opt} ta nai ji. Ache: {values}. Kon ta nibo?', bn: 'এই {opt} টা নেই জি। আছে: {values}। কোনটা নিবেন?', en: 'We do not have that {opt}. Available: {values}. Which one?' },
-  's.oos_qty': { bl: 'Dukkhito ji, {name} ekhon matro {n} ta ache. Koyta nibo?', bn: 'দুঃখিত জি, {name} এখন মাত্র {n}টা আছে। কয়টা নিবেন?', en: 'Sorry, only {n} of {name} left. How many would you like?' },
+  's.cancel': { bl: 'Thik ache, onno kichu lagle bolben.', bn: 'ঠিক আছে, অন্য কিছু লাগলে বলবেন।', en: 'No problem. Tell me if you need anything else.' },
+  's.many': { bl: '{n} ta ache. Kon ta nibo? "Eta nibo" chapun ba number likhun.', bn: '{n}টা আছে। কোনটা নিবেন? "এটা নিবো" চাপুন বা নাম্বার লিখুন।', en: 'We have {n} options. Which one would you like? Tap "Eta nibo" or type the number.' },
+  's.bad_opt': { bl: 'Ei {opt} ta nai. Ache: {values}. Kon ta nibo?', bn: 'এই {opt} টা নেই। আছে: {values}। কোনটা নিবেন?', en: 'We do not have that {opt}. Available: {values}. Which one?' },
+  's.oos_qty': { bl: 'Dukkhito, {name} ekhon matro {n} ta ache. Koyta nibo?', bn: 'দুঃখিত, {name} এখন মাত্র {n}টা আছে। কয়টা নিবেন?', en: 'Sorry, only {n} of {name} left. How many would you like?' },
   'qr.pick': { bl: 'Eta nibo', bn: 'এটা নিবো', en: 'Eta nibo' },
 
   'o.hishab': { bl: 'Apnar order er hishab:', bn: 'আপনার অর্ডারের হিসাব:', en: 'Your order summary:' },
@@ -115,7 +132,7 @@ add({
   'o.confirm_line': { bl: 'Shob thik thakle "confirm" likhun.', bn: 'সব ঠিক থাকলে "কনফার্ম" লিখুন।', en: 'If everything is correct, reply "confirm".' },
   'qr.confirm': { bl: 'Confirm', bn: 'কনফার্ম', en: 'Confirm' },
   'qr.change': { bl: 'Change korbo', bn: 'পরিবর্তন করবো', en: 'Change' },
-  'o.tip_free': { bl: 'Aro {gap} er product nile delivery free hobe ji.', bn: 'আরও {gap} এর প্রোডাক্ট নিলে ডেলিভারি ফ্রি হবে জি।', en: 'Add {gap} more to get free delivery.' },
+  'o.tip_free': { bl: 'Aro {gap} er product nile delivery free hobe.', bn: 'আরও {gap} এর প্রোডাক্ট নিলে ডেলিভারি ফ্রি হবে।', en: 'Add {gap} more to get free delivery.' },
   'o.confirmed_h': { bl: 'Order #{id} confirm hoyeche', bn: 'অর্ডার #{id} কনফার্ম হয়েছে', en: 'Order #{id} is confirmed' },
   'o.paid': { bl: 'Paid:', bn: 'পরিশোধ:', en: 'Paid:' },
   'o.due': { bl: 'Delivery te dite hobe:', bn: 'ডেলিভারির সময় দিতে হবে:', en: 'To pay on delivery:' },
@@ -124,25 +141,25 @@ add({
   'o.total2': { bl: 'Total:', bn: 'মোট:', en: 'Total:' },
   'o.delivery2': { bl: 'Delivery:', bn: 'ডেলিভারি:', en: 'Delivery:' },
 
-  'p.got': { bl: 'Order #{id} peyechi ji. {amount} {method} e Send Money korun:', bn: 'অর্ডার #{id} পেয়েছি জি। {amount} {method} এ Send Money করুন:', en: 'Got order #{id}. Please Send Money {amount} via {method}:' },
+  'p.got': { bl: 'Order #{id} peyechi. {amount} {method} e Send Money korun:', bn: 'অর্ডার #{id} পেয়েছি। {amount} {method} এ Send Money করুন:', en: 'Got order #{id}. Please Send Money {amount} via {method}:' },
   'p.got_plain': { bl: 'Order #{id} peyechi. Confirm korte {amount} pathan:', bn: 'অর্ডার #{id} পেয়েছি। কনফার্ম করতে {amount} পাঠান:', en: 'Got order #{id}. To confirm, please send {amount}:' },
   'p.send_trx': { bl: 'Pathiye TrxID likhe din (ba je number theke pathalen tar last 4 digit).', bn: 'পাঠিয়ে TrxID লিখে দিন (বা যে নাম্বার থেকে পাঠালেন তার শেষ ৪ ডিজিট)।', en: 'After sending, type the TrxID (or the last 4 digits of the number you sent from).' },
   'p.send_trx2': { bl: 'Pathiye shudhu TrxID ar je number theke pathalen ta likhe din.', bn: 'পাঠিয়ে শুধু TrxID আর যে নাম্বার থেকে পাঠালেন তা লিখে দিন।', en: 'After sending, just type the TrxID and the number you sent from.' },
-  'p.thanks': { bl: ['Dhonnobad ji, payment er request peyechi. Admin verify korle order confirm hoye jabe.', 'Dhonnobad ji, payment er request peyechi. Admin check korei order confirm kore dibe.'], bn: ['ধন্যবাদ জি, পেমেন্টের রিকোয়েস্ট পেয়েছি। অ্যাডমিন ভেরিফাই করলে অর্ডার কনফার্ম হয়ে যাবে।'], en: ['Thank you, I have your payment request. The order will be confirmed once the admin verifies it.'] },
-  'p.review': { bl: 'Order #{id} er payment admin verify korche ji, shighroi janabo.', bn: 'অর্ডার #{id} এর পেমেন্ট অ্যাডমিন ভেরিফাই করছে জি, শীঘ্রই জানাবো।', en: 'The admin is verifying the payment for order #{id}. I will update you soon.' },
-  'p.advance': { bl: 'Order confirm korte age {amount} advance dite hobe ji. {methods} kon ta e dibena?{extra}', bn: 'অর্ডার কনফার্ম করতে আগে {amount} অগ্রিম দিতে হবে জি। {methods} কোনটাতে দিবেন?{extra}', en: 'To confirm the order, an advance of {amount} is needed. Which will you use: {methods}?{extra}' },
+  'p.thanks': { bl: ['Dhonnobad, payment er request peyechi. Admin verify korle order confirm hoye jabe.', 'Dhonnobad, payment er request peyechi. Admin check korei order confirm kore dibe.'], bn: ['ধন্যবাদ, পেমেন্টের রিকোয়েস্ট পেয়েছি। অ্যাডমিন ভেরিফাই করলে অর্ডার কনফার্ম হয়ে যাবে।'], en: ['Thank you, I have your payment request. The order will be confirmed once the admin verifies it.'] },
+  'p.review': { bl: 'Order #{id} er payment admin verify korche, shighroi janabo.', bn: 'অর্ডার #{id} এর পেমেন্ট অ্যাডমিন ভেরিফাই করছে, শীঘ্রই জানাবো।', en: 'The admin is verifying the payment for order #{id}. I will update you soon.' },
+  'p.advance': { bl: 'Order confirm korte age {amount} advance dite hobe. {methods} kon ta e dibena?{extra}', bn: 'অর্ডার কনফার্ম করতে আগে {amount} অগ্রিম দিতে হবে। {methods} কোনটাতে দিবেন?{extra}', en: 'To confirm the order, an advance of {amount} is needed. Which will you use: {methods}?{extra}' },
   'p.extra_full': { bl: ' (Chaile puro {total}-o dite paren)', bn: ' (চাইলে পুরো {total}-ও দিতে পারেন)', en: ' (You can also pay the full {total} if you prefer.)' },
-  'p.pending': { bl: 'Order #{id} peyechi ji. Admin confirm korle janiye dibo.', bn: 'অর্ডার #{id} পেয়েছি জি। অ্যাডমিন কনফার্ম করলে জানিয়ে দিবো।', en: 'Got order #{id}. I will let you know once the admin confirms it.' },
-  'p.need': { bl: 'Apnar {what} ta din ji.', bn: 'আপনার {what} টা দিন জি।', en: 'Please send your {what}.' },
+  'p.pending': { bl: 'Order #{id} peyechi. Admin confirm korle janiye dibo.', bn: 'অর্ডার #{id} পেয়েছি। অ্যাডমিন কনফার্ম করলে জানিয়ে দিবো।', en: 'Got order #{id}. I will let you know once the admin confirms it.' },
+  'p.need': { bl: 'Apnar {what} ta din.', bn: 'আপনার {what} টা দিন।', en: 'Please send your {what}.' },
 
-  'st.pending': { bl: 'Order #{id} admin er approval er opekkhay ache ji.', bn: 'অর্ডার #{id} অ্যাডমিনের অ্যাপ্রুভালের অপেক্ষায় আছে জি।', en: 'Order #{id} is waiting for admin approval.' },
-  'st.awaiting_payment': { bl: 'Order #{id} e {amount} advance dile order confirm hobe ji.', bn: 'অর্ডার #{id} এ {amount} অগ্রিম দিলে অর্ডার কনফার্ম হবে জি।', en: 'Order #{id} will be confirmed once you pay the {amount} advance.' },
-  'st.payment_review': { bl: 'Order #{id} er payment admin verify korche ji, shighroi confirm hobe.', bn: 'অর্ডার #{id} এর পেমেন্ট অ্যাডমিন ভেরিফাই করছে জি, শীঘ্রই কনফার্ম হবে।', en: 'The payment for order #{id} is being verified; it will be confirmed shortly.' },
-  'st.confirmed': { bl: 'Order #{id} confirm, ready kora hocche ji. Delivery {time}.', bn: 'অর্ডার #{id} কনফার্ম, রেডি করা হচ্ছে জি। ডেলিভারি {time}।', en: 'Order #{id} is confirmed and being prepared. Delivery: {time}.' },
-  'st.shipped': { bl: 'Order #{id} pathano hoyeche ji.{track}', bn: 'অর্ডার #{id} পাঠানো হয়েছে জি।{track}', en: 'Order #{id} has been shipped.{track}' },
-  'st.delivered': { bl: 'Order #{id} delivered hoyeche ji. Dhonnobad.', bn: 'অর্ডার #{id} ডেলিভারি হয়েছে জি। ধন্যবাদ।', en: 'Order #{id} has been delivered. Thank you!' },
-  'st.cancelled': { bl: 'Order #{id} cancel kora hoyeche ji.', bn: 'অর্ডার #{id} ক্যান্সেল করা হয়েছে জি।', en: 'Order #{id} has been cancelled.' },
-  'st.returned': { bl: 'Order #{id} return hishebe dhora hoyeche ji.', bn: 'অর্ডার #{id} রিটার্ন হিসেবে ধরা হয়েছে জি।', en: 'Order #{id} is marked as returned.' },
+  'st.pending': { bl: 'Order #{id} admin er approval er opekkhay ache.', bn: 'অর্ডার #{id} অ্যাডমিনের অ্যাপ্রুভালের অপেক্ষায় আছে।', en: 'Order #{id} is waiting for admin approval.' },
+  'st.awaiting_payment': { bl: 'Order #{id} e {amount} advance dile order confirm hobe.', bn: 'অর্ডার #{id} এ {amount} অগ্রিম দিলে অর্ডার কনফার্ম হবে।', en: 'Order #{id} will be confirmed once you pay the {amount} advance.' },
+  'st.payment_review': { bl: 'Order #{id} er payment admin verify korche, shighroi confirm hobe.', bn: 'অর্ডার #{id} এর পেমেন্ট অ্যাডমিন ভেরিফাই করছে, শীঘ্রই কনফার্ম হবে।', en: 'The payment for order #{id} is being verified; it will be confirmed shortly.' },
+  'st.confirmed': { bl: 'Order #{id} confirm, ready kora hocche. Delivery {time}.', bn: 'অর্ডার #{id} কনফার্ম, রেডি করা হচ্ছে। ডেলিভারি {time}।', en: 'Order #{id} is confirmed and being prepared. Delivery: {time}.' },
+  'st.shipped': { bl: 'Order #{id} pathano hoyeche.{track}', bn: 'অর্ডার #{id} পাঠানো হয়েছে।{track}', en: 'Order #{id} has been shipped.{track}' },
+  'st.delivered': { bl: 'Order #{id} delivered hoyeche. Dhonnobad.', bn: 'অর্ডার #{id} ডেলিভারি হয়েছে। ধন্যবাদ।', en: 'Order #{id} has been delivered. Thank you!' },
+  'st.cancelled': { bl: 'Order #{id} cancel kora hoyeche.', bn: 'অর্ডার #{id} ক্যান্সেল করা হয়েছে।', en: 'Order #{id} has been cancelled.' },
+  'st.returned': { bl: 'Order #{id} return hishebe dhora hoyeche.', bn: 'অর্ডার #{id} রিটার্ন হিসেবে ধরা হয়েছে।', en: 'Order #{id} is marked as returned.' },
   'n.shipped': { bl: 'Apnar order #{id} pathano hoyeche.{track}', bn: 'আপনার অর্ডার #{id} পাঠানো হয়েছে।{track}', en: 'Your order #{id} has been shipped.{track}' },
   'n.delivered': { bl: 'Order #{id} delivered hoyeche. Dhonnobad.', bn: 'অর্ডার #{id} ডেলিভারি হয়েছে। ধন্যবাদ।', en: 'Order #{id} has been delivered. Thank you!' },
   'n.cancelled': { bl: 'Order #{id} cancel kora hoyeche.{refund}', bn: 'অর্ডার #{id} ক্যান্সেল করা হয়েছে।{refund}', en: 'Order #{id} has been cancelled.{refund}' },
@@ -151,4 +168,4 @@ add({
   'n.pay_bad': { bl: 'Apnar payment verify kora jayni. Shothik TrxID ar number abar likhe din.', bn: 'আপনার পেমেন্ট ভেরিফাই করা যায়নি। সঠিক TrxID আর নাম্বার আবার লিখে দিন।', en: 'We could not verify your payment. Please send the correct TrxID and number again.' },
 });
 
-module.exports = { add, t, variants, money, list, detect, learn, langOf, LANG_NAME, pick, BN };
+module.exports = { soften, add, t, variants, money, list, detect, learn, langOf, LANG_NAME, pick, BN };

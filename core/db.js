@@ -17,7 +17,7 @@ async function connect(uri) {
     ix('orders', { psid: 1 }),
     ix('payments', { trx: 1 }, { unique: true }),
     ix('messages', { psid: 1, t: -1 }),
-    ix('logs', { createdAt: 1 }, { expireAfterSeconds: 14 * 86400 }),
+    ix('logs', { createdAt: 1 }, { expireAfterSeconds: 60 * 86400 }),
     ix('mids', { createdAt: 1 }, { expireAfterSeconds: 86400 }),
     ix('comments', { createdAt: 1 }, { expireAfterSeconds: 30 * 86400 }),
     ix('media', { exp: 1 }, { expireAfterSeconds: 0 }),

@@ -1,4 +1,4 @@
-// Central logger: console (Render logs) + live ring buffer (panel) + MongoDB (14 days)
+// Central logger: console (Render logs) + live ring buffer (panel) + MongoDB (60 days)
 const subs = new Set();
 const ring = [];
 let sink = null;
@@ -15,7 +15,7 @@ const fmt = (m) => {
 function log(type, msg, meta, level = 'info') {
   const e = { t: Date.now(), type, level, msg: mask(msg), meta: meta == null ? undefined : mask(fmt(meta)).slice(0, 1500) };
   ring.push(e);
-  if (ring.length > 400) ring.shift();
+  if (ring.length > 1000) ring.shift();
   const line = `[${new Date(e.t).toISOString()}] ${level.toUpperCase().padEnd(5)} ${String(type).padEnd(9)} ${e.msg}${e.meta ? ' | ' + e.meta : ''}`;
   (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)(line);
   subs.forEach((fn) => { try { fn(e); } catch {} });

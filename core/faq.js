@@ -6,16 +6,16 @@ const I = require('./i18n');
 const P = require('./products');
 
 I.add({
-  'f.time': { bl: ['Delivery te {time} lage ji.', 'Order confirm hole {time} er moddhe pabenn ji.'], bn: ['ডেলিভারিতে {time} লাগে জি।', 'অর্ডার কনফার্ম হলে {time} এর মধ্যে পাবেন জি।'], en: ['Delivery takes {time}.', 'You will get it within {time} after confirmation.'] },
+  'f.time': { bl: ['Delivery te {time} lage.', 'Order confirm hole {time} er moddhe pabenn.'], bn: ['ডেলিভারিতে {time} লাগে।', 'অর্ডার কনফার্ম হলে {time} এর মধ্যে পাবেন।'], en: ['Delivery takes {time}.', 'You will get it within {time} after confirmation.'] },
   'f.charge': { bl: 'Delivery charge Dhaka-r bhitore {in}, Dhaka-r baire {out}.{free}', bn: 'ডেলিভারি চার্জ ঢাকার ভিতরে {in}, ঢাকার বাইরে {out}।{free}', en: 'Delivery charge is {in} inside Dhaka and {out} outside Dhaka.{free}' },
   'f.free': { bl: ' {min} er upore delivery free.', bn: ' {min} এর উপরে ডেলিভারি ফ্রি।', en: ' Delivery is free above {min}.' },
-  'f.cod_yes': { bl: 'Ji, Cash on Delivery ache. Product haate peye taka dite parben.', bn: 'জি, ক্যাশ অন ডেলিভারি আছে। প্রোডাক্ট হাতে পেয়ে টাকা দিতে পারবেন।', en: 'Yes, Cash on Delivery is available. You pay when you receive the product.' },
-  'f.cod_adv': { bl: 'Prothom order e shudhu delivery charge advance dite hobe ji, baki taka product haate peye dibena. Ekbar nile pore Cash on Delivery o paben.', bn: 'প্রথম অর্ডারে শুধু ডেলিভারি চার্জ অগ্রিম দিতে হবে জি, বাকি টাকা প্রোডাক্ট হাতে পেয়ে দিবেন।', en: 'For a first order only the delivery charge is paid in advance; the rest you pay when you receive the product.' },
-  'f.cod_full': { bl: 'Order confirm korte advance dite hoy ji, details order er shomoy bole dibo.', bn: 'অর্ডার কনফার্ম করতে অগ্রিম দিতে হয় জি, বিস্তারিত অর্ডারের সময় বলে দিবো।', en: 'An advance is needed to confirm the order; I will share the details when you order.' },
-  'f.pay': { bl: 'Payment {methods} e korte paren ji.', bn: 'পেমেন্ট {methods} এ করতে পারেন জি।', en: 'You can pay via {methods}.' },
-  'f.size_ask': { bl: ['Apnar height ar weight ta bolun ji, size ta thik kore bole dibo.', 'Height (feet/cm) ar weight (kg) bolun ji, apnar size ta bole dichhi.'], bn: ['আপনার হাইট আর ওজনটা বলুন জি, সাইজটা ঠিক করে বলে দিবো।'], en: ['Tell me your height and weight and I will suggest the right size.'] },
-  'f.size_is': { bl: 'Apnar jonno {size} size ta perfect hobe ji.', bn: 'আপনার জন্য {size} সাইজটা পারফেক্ট হবে জি।', en: '{size} should fit you perfectly.' },
-  'f.size_na': { bl: 'Apnar size {size}, kintu eta {size} te nai ji. Ache: {values}.', bn: 'আপনার সাইজ {size}, কিন্তু এটা {size} এ নেই জি। আছে: {values}।', en: 'Your size would be {size}, but it is not available in this product. Available: {values}.' },
+  'f.cod_yes': { bl: 'Ji, Cash on Delivery ache. Product haate peye taka dite parben.', bn: 'ক্যাশ অন ডেলিভারি আছে। প্রোডাক্ট হাতে পেয়ে টাকা দিতে পারবেন।', en: 'Yes, Cash on Delivery is available. You pay when you receive the product.' },
+  'f.cod_adv': { bl: 'Prothom order e shudhu delivery charge advance dite hobe, baki taka product haate peye dibena. Ekbar nile pore Cash on Delivery o paben.', bn: 'প্রথম অর্ডারে শুধু ডেলিভারি চার্জ অগ্রিম দিতে হবে, বাকি টাকা প্রোডাক্ট হাতে পেয়ে দিবেন।', en: 'For a first order only the delivery charge is paid in advance; the rest you pay when you receive the product.' },
+  'f.cod_full': { bl: 'Order confirm korte advance dite hoy, details order er shomoy bole dibo.', bn: 'অর্ডার কনফার্ম করতে অগ্রিম দিতে হয়, বিস্তারিত অর্ডারের সময় বলে দিবো।', en: 'An advance is needed to confirm the order; I will share the details when you order.' },
+  'f.pay': { bl: 'Payment {methods} e korte paren.', bn: 'পেমেন্ট {methods} এ করতে পারেন।', en: 'You can pay via {methods}.' },
+  'f.size_ask': { bl: ['Apnar height ar weight ta bolun, size ta thik kore bole dibo.', 'Height (feet/cm) ar weight (kg) bolun, apnar size ta bole dichhi.'], bn: ['আপনার হাইট আর ওজনটা বলুন, সাইজটা ঠিক করে বলে দিবো।'], en: ['Tell me your height and weight and I will suggest the right size.'] },
+  'f.size_is': { bl: 'Apnar jonno {size} size ta perfect hobe.', bn: 'আপনার জন্য {size} সাইজটা পারফেক্ট হবে।', en: '{size} should fit you perfectly.' },
+  'f.size_na': { bl: 'Apnar size {size}, kintu eta {size} te nai. Ache: {values}.', bn: 'আপনার সাইজ {size}, কিন্তু এটা {size} এ নেই। আছে: {values}।', en: 'Your size would be {size}, but it is not available in this product. Available: {values}.' },
 });
 
 // ----- size guide: setting size_guide, one line per size:  M: 55-65 kg, 160-168 cm -----

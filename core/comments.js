@@ -116,13 +116,13 @@ const nameOf = (p) => `${p.name}${p.variant ? ' (' + p.variant + ')' : ''}`;
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 function privateText(products, bn) {
   const hi = bn ? 'আসসালামু আলাইকুম।' : 'Assalamu alaikum.';
-  if (!products.length) return bn ? `${hi} কোন প্রোডাক্টটি লাগবে জি? নাম বা ছবি পাঠান।` : `${hi} Kon product ta lagbe ji? Naam ba chobi pathaben.`;
+  if (!products.length) return bn ? `${hi} কোন প্রোডাক্টটি লাগবে? নাম বা ছবি পাঠান।` : `${hi} Kon product ta lagbe? Naam ba chobi pathaben.`;
   if (products.length === 1) {
     const p = products[0];
-    if (p.stock <= 0) return bn ? `${hi} ${nameOf(p)} এখন স্টকে নেই জি। অন্য ডিজাইন দেখাবো?` : `${hi} ${nameOf(p)} ekhon stock e nai ji. Onno design dekhabo?`;
+    if (p.stock <= 0) return bn ? `${hi} ${nameOf(p)} এখন স্টকে নেই। অন্য ডিজাইন দেখাবো?` : `${hi} ${nameOf(p)} ekhon stock e nai. Onno design dekhabo?`;
     const o = p.options || [];
     const optTxt = o.length ? ' ' + o.map((x) => `${x.name}: ${x.values.join('/')}`).join(', ') + '.' : '';
-    const ask = o.length ? (bn ? `কোন ${o[0].name} লাগবে জি?` : `Kon ${o[0].name} lagbe ji?`) : (bn ? 'কয়টা লাগবে জি?' : 'Koyta lagbe ji?');
+    const ask = o.length ? (bn ? `কোন ${o[0].name} লাগবে?` : `Kon ${o[0].name} lagbe?`) : (bn ? 'কয়টা লাগবে?' : 'Koyta lagbe?');
     return bn ? `${hi} ${nameOf(p)} এর দাম ${Math.round(p.price)} টাকা।${optTxt} ${ask}` : `${hi} ${nameOf(p)} er dam ${O.money(p.price)}.${optTxt} ${ask}`;
   }
   const lines = products.slice(0, 3).map((p, i) => `${i + 1}) ${nameOf(p)} - ${O.money(p.price)}`).join('\n');
@@ -131,9 +131,9 @@ function privateText(products, bn) {
 function publicText(products, sent, bn) {
   if (sent) {
     if (S.get('comment_price_public') && products.length === 1 && products[0].stock > 0) return bn ? `${nameOf(products[0])} ${Math.round(products[0].price)} টাকা। বিস্তারিত ইনবক্সে পাঠিয়েছি জি` : `${nameOf(products[0])} ${O.money(products[0].price)}. Details inbox e pathiyechi ji`;
-    return pick(bn ? ['ইনবক্সে ডিটেইলস পাঠিয়েছি জি', 'জি, ইনবক্স চেক করুন, পাঠিয়ে দিয়েছি'] : ['Inbox e details pathiyechi ji', 'Ji, inbox check korun, pathiyechi', 'Details inbox e pathiyechi, dekhben ji']);
+    return pick(bn ? ['ইনবক্সে ডিটেইলস পাঠিয়েছি', 'ইনবক্স চেক করুন, পাঠিয়ে দিয়েছি'] : ['Inbox e details pathiyechi', 'Inbox check korun, pathiyechi', 'Details inbox e pathiyechi, dekhben']);
   }
-  return pick(bn ? ['ডিটেইলস জানতে ইনবক্সে একটা মেসেজ দিন জি', 'ইনবক্সে মেসেজ করুন জি, জানিয়ে দিচ্ছি'] : ['Details jante inbox e ekta message din ji', 'Inbox e message korun ji, details diye dibo']);
+  return pick(bn ? ['ডিটেইলস জানতে ইনবক্সে একটা মেসেজ দিন', 'ইনবক্সে মেসেজ করুন, জানিয়ে দিচ্ছি'] : ['Details jante inbox e ekta message din', 'Inbox e message korun, details diye dibo']);
 }
 
 module.exports = { handle, setPageId };

@@ -50,7 +50,9 @@ details>div{padding:0 14px 14px}
 .thumb{width:56px;height:56px;border-radius:10px;object-fit:cover;background:var(--bg);flex:none}
 .imgs{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}.imgs div{position:relative}.imgs img{width:66px;height:66px;object-fit:cover;border-radius:10px}
 .imgs button{position:absolute;top:-6px;right:-6px;border:0;background:var(--er);color:#fff;border-radius:50%;width:20px;height:20px}
-#log{font:12px/1.55 ui-monospace,Menlo,Consolas,monospace}
+#log{font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace}
+.lh{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.lt{font-weight:700;color:var(--ac)}.lm{flex:1 1 220px}.ll{border-left:3px solid transparent}.ll.error{border-left-color:var(--er)}.ll.warn{border-left-color:#d9a400}.ll.ok{border-left-color:#1a9d5b}
+.lday{position:sticky;top:0;background:var(--card);padding:4px 10px;font-weight:700;font-size:11px;color:var(--mu);border-bottom:1px solid var(--bd);text-transform:uppercase;z-index:1}.lmore{text-align:center;padding:8px}.lmeta summary{cursor:pointer;color:var(--mu);font-size:11px}.lmeta pre{white-space:pre-wrap;margin:4px 0 0;color:var(--mu)}
 .ll{padding:5px 10px;border-bottom:1px solid var(--bd);word-break:break-word}
 .ll.warn{background:var(--wab)}.ll.error{background:var(--erb)}.ll .t{color:var(--mu)}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.chip{padding:6px 12px;border-radius:999px;border:1px solid var(--bd);background:var(--card);cursor:pointer;font-size:12.5px;font-weight:600;transition:.15s}.chip:hover{border-color:var(--ac)}.chip.on{background:var(--ac);color:#fff;border-color:var(--ac)}
@@ -90,7 +92,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const money=n=>Math.round(Number(n)||0).toLocaleString('en-US')+' tk';
 const TABS=[['dash','🏠 Home'],['orders','🛒 Orders'],['chats','💬 Chats'],['hot','🔥 Hot'],['products','👕 Products'],['inbox','📥 Inbox'],['reports','📊 Reports'],['posts','📌 Posts'],['logs','📜 Logs'],['data','🗂 Data'],['settings','⚙️ Settings'],['test','🤖 Test chat']];
 let ME={role:'staff',perms:[]};const TABPERM={chats:'inbox',hot:'inbox',reports:'orders',posts:'products',orders:'orders',products:'products',inbox:'inbox',logs:'logs',data:'data',settings:'settings',test:'test'};
-let page='dash',es=null,mods=[],pf=null,dataTab='kb',dataEdit=null,sess=Math.random().toString(36).slice(2,9);
+let page='dash',es=null,mods=[],pf=null,dataTab='kb',dataEdit=null,sess=(()=>{try{return localStorage.getItem('tsess')||(localStorage.tsess=Math.random().toString(36).slice(2,9))}catch(e){return Math.random().toString(36).slice(2,9)}})();
 
 async function api(p,o={}){
   const init={method:o.method||'GET',headers:{},credentials:'same-origin'};
@@ -233,17 +235,23 @@ pages.inbox=async()=>{
 };
 /* ---------- LOGS ---------- */
 const ICON={message:'📩',reply:'📤',ai:'🤖',tool:'🛠️',order:'🛒',comment:'💬',webhook:'🔗',voice:'🎤',facebook:'📘',boot:'🚀',db:'🗄️',notify:'🔔',telegram:'✈️',upload:'🖼️',steadfast:'🚚',system:'⚙️',auth:'🔐',crash:'💥',settings:'💾',api:'🧩',agent:'🧠',module:'📦'};
-const LI={ok:'✅',warn:'⚠️',error:'❌',info:'•'};
-let lfil='all',lpause=false,lq='';const lseen=new Set();const lkey=e=>e.t+'|'+e.type+'|'+e.msg;
-const lrow=e=>{const t=new Date(e.t).toLocaleTimeString('en-GB');return `<div class="ll ${e.level}" data-t="${esc(e.type)}" data-l="${e.level}"><span class="t">${t}</span> ${LI[e.level]||''} ${ICON[e.type]||''} <b>${esc(e.type)}</b> ${esc(e.msg)}${e.meta?`<div class="mu" style="white-space:pre-wrap">${esc(String(e.meta).slice(0,700))}</div>`:''}</div>`};
-function lapply(){document.querySelectorAll('#log .ll').forEach(r=>{const okf=lfil==='all'||r.dataset.l===lfil||r.dataset.t===lfil;const okq=!lq||r.textContent.toLowerCase().includes(lq);r.hidden=!(okf&&okq)})}
+const LI={ok:'✅',warn:'⚠️',error:'❌',info:'ℹ️'};
+let lfil='all',lpause=false,lq='',lauto=true,lfirst=0;const lseen=new Set();const lkey=e=>e.t+'|'+e.type+'|'+e.msg;
+const lday=t=>{const d=new Date(t),n=new Date(),y=new Date(Date.now()-864e5);const k=x=>x.toDateString();return k(d)===k(n)?'Ajke':k(d)===k(y)?'Gotokal':d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})};
+const lrow=e=>{const t=new Date(e.t).toLocaleTimeString('en-GB');return `<div class="ll ${e.level}" data-t="${esc(e.type)}" data-l="${e.level}" data-d="${lday(e.t)}"><div class="lh"><span class="t">${t}</span><span class="lt">${ICON[e.type]||''} ${esc(e.type)}</span><span class="lm">${esc(e.msg)}</span></div>${e.meta?`<details class="lmeta"><summary>details</summary><pre>${esc(String(e.meta).slice(0,1500))}</pre></details>`:''}</div>`};
+function lbuild(rows){let last='',h='';rows.forEach(e=>{lseen.add(lkey(e));const d=lday(e.t);if(d!==last){h+=`<div class="lday">${d}</div>`;last=d}h+=lrow(e)});return h}
+function lapply(){let n={error:0,warn:0};document.querySelectorAll('#log .ll').forEach(r=>{const okf=lfil==='all'||r.dataset.l===lfil||r.dataset.t===lfil;const okq=!lq||r.textContent.toLowerCase().includes(lq);r.hidden=!(okf&&okq);if(!r.hidden&&n[r.dataset.l]!=null)n[r.dataset.l]++});const c=$('#lcnt');if(c)c.textContent=`${document.querySelectorAll('#log .ll:not([hidden])').length} ta dekhachhe`}
 pages.logs=async()=>{
-  const old=await api('/logs?limit=200');
-  $('#main').innerHTML=`<div class="chips">${['all','error','warn','ok','message','reply','ai','order','comment','voice'].map(f=>`<span class="chip ${lfil===f?'on':''}" data-a="lfil" data-f="${f}">${f}</span>`).join('')}<span class="chip" data-a="lpause" id="lp">${lpause?'Resume':'Pause'}</span><span class="chip" data-a="lcopy">Copy</span><span class="chip" data-a="lclear">Clear</span></div><input id="lq" placeholder="Search..." value="${esc(lq)}" style="margin-bottom:8px"><div class="card" style="padding:0"><div id="log" style="max-height:68vh;overflow:auto">${old.map(e=>{lseen.add(lkey(e));return lrow(e)}).join('')}</div></div>`;
+  const old=await api('/logs?limit=300');lseen.clear();lfirst=old.length?old[0].t:0;
+  $('#main').innerHTML=`<div class="chips">${['all','error','warn','ok','message','reply','ai','order','comment','voice'].map(f=>`<span class="chip ${lfil===f?'on':''}" data-a="lfil" data-f="${f}">${f}</span>`).join('')}</div>
+  <div class="row" style="margin-bottom:8px"><input id="lq" placeholder="Search..." value="${esc(lq)}" style="flex:1"><button class="btn s" data-a="lpause" id="lp">${lpause?'▶ Resume':'⏸ Pause'}</button><button class="btn s" data-a="lcopy">Copy</button><button class="btn s d" data-a="lclear">Clear</button></div>
+  <div class="sm mu" style="margin-bottom:6px"><span id="lcnt"></span> · Log 60 din thake, nijer theke muchbe na. Clear shudhu apni chaple.</div>
+  <div class="card" style="padding:0"><div id="log" style="max-height:66vh;overflow:auto"><div class="lmore"><button class="btn s" data-a="lmore">⬆ Aro purano log</button></div>${lbuild(old)}</div></div>`;
   const box=$('#log');box.scrollTop=box.scrollHeight;lapply();
+  box.onscroll=()=>{lauto=box.scrollHeight-box.scrollTop-box.clientHeight<80};
   $('#lq').oninput=e=>{lq=e.target.value.toLowerCase();lapply()};
   es=new EventSource('/api/logs/stream');
-  es.onmessage=m=>{if(lpause)return;const e=JSON.parse(m.data);const b=$('#log');if(!b)return;if(lseen.has(lkey(e)))return;lseen.add(lkey(e));const near=b.scrollHeight-b.scrollTop-b.clientHeight<80;b.insertAdjacentHTML('beforeend',lrow(e));while(b.children.length>500)b.firstChild.remove();lapply();if(near)b.scrollTop=b.scrollHeight};
+  es.onmessage=m=>{if(lpause)return;const e=JSON.parse(m.data);const b=$('#log');if(!b||lseen.has(lkey(e)))return;lseen.add(lkey(e));const hasDay=[...b.querySelectorAll('.lday')].pop();if(!hasDay||hasDay.textContent!==lday(e.t))b.insertAdjacentHTML('beforeend',`<div class="lday">${lday(e.t)}</div>`);b.insertAdjacentHTML('beforeend',lrow(e));lapply();if(lauto)b.scrollTop=b.scrollHeight};
 };
 /* ---------- DATA (knowledge, coupons, post links) ---------- */
 const DATA={kb:{t:'Knowledge (AI eta dekhe uttor dey)',f:[['title','Title / proshno'],['keywords','Keyword (comma diye, jemon: return, exchange). Customer eta likhle AI na, server hobuhu ei uttor dibe'],['content','Uttor / details','area'],['active','Active','bool']]},
@@ -281,8 +289,11 @@ function fld(f,v){
 /* ---------- TEST CHAT ---------- */
 pages.test=async()=>{
   $('#main').innerHTML=`<div class="card"><div class="sm mu" style="margin-bottom:6px">Live e jabar age AI er shathe nijei kotha bolun. Order dile TEST order hishabe Orders e dekhabe (delete kora jay). Facebook e kichu pathay na.</div><div class="chat" id="chat"></div>
-  <div class="row" style="margin-top:8px"><input id="tin" placeholder="Message likhun..." style="flex:1"><button class="btn p" data-a="tsend">Send</button></div><div class="row" style="margin-top:8px"><button class="btn s" data-a="treset">Test data reset</button></div></div>`;
-  $('#tin').onkeydown=e=>{if(e.key==='Enter')sendTest()};
+  <div class="row" style="margin-top:8px"><input id="tin" placeholder="Message likhun..." style="flex:1" autocomplete="off"><button class="btn p" data-a="tsend">Send</button></div><div class="row" style="margin-top:8px"><button class="btn s" data-a="treset">Notun chat (purano muche jabe)</button><span class="sm mu">Chat nijer theke kokhono muchbe na.</span></div></div>`;
+  try{$('#chat').innerHTML=localStorage.getItem('tchat:'+sess)||''}catch(e){}
+  if(!$('#chat').innerHTML)$('#chat').innerHTML='<div class="bub bot mu">Kichu likhe test korun. Eta Facebook e jay na.</div>';
+  $('#chat').scrollTop=1e9;
+  $('#tin').onkeydown=e=>{if(e.key==='Enter')sendTest()};$('#tin').focus();
 };
 function bubble(m){
   if(m.type==='text')return `<div class="bub bot">${esc(m.text)}</div>`;
@@ -295,6 +306,7 @@ async function sendTest(){
   try{const r=await api('/test-chat',{method:'POST',body:{session:sess,text:t}});$('#typ').remove();c.insertAdjacentHTML('beforeend',r.messages.map(bubble).join('')||'<div class="bub bot mu">(kono reply nai, Logs dekhun)</div>')}
   catch(e){$('#typ')&&$('#typ').remove();toast(e.message,true)}
   c.scrollTop=c.scrollHeight;
+  try{localStorage.setItem('tchat:'+sess,c.innerHTML.replace(/<div class="bub bot mu" id="typ">typing...<\/div>/,''))}catch(e){}
 }
 /* ---------- CHATS (live) ---------- */
 let chatPsid='';
@@ -403,7 +415,8 @@ const H={
   async cust(b){await api('/customers/'+encodeURIComponent(b.dataset.p),{method:'POST',body:{action:b.dataset.x}});toast('Hoyeche');go('inbox')},
   lfil(b){lfil=b.dataset.f;document.querySelectorAll('[data-a=lfil]').forEach(c=>c.classList.toggle('on',c.dataset.f===lfil));lapply()},
   lpause(b){lpause=!lpause;b.textContent=lpause?'Resume':'Pause'},
-  async lclear(){await api('/logs',{method:'DELETE'});$('#log').innerHTML='';lseen.clear();toast('Log clear hoyeche')},
+  async lmore(){const r=await api('/logs?limit=300&before='+lfirst);if(!r.length){toast('Aro log nai');return}lfirst=r[0].t;const b=$('#log'),h=b.scrollHeight;b.querySelector('.lmore').insertAdjacentHTML('afterend',lbuild(r));b.scrollTop=b.scrollHeight-h;lapply()},
+  async lclear(){if(!confirm('Shob log muchte chan?'))return;await api('/logs',{method:'DELETE'});$('#log').innerHTML='';lseen.clear();toast('Log clear hoyeche')},
   async lcopy(){const txt=[...document.querySelectorAll('#log .ll')].filter(r=>!r.hidden).map(r=>r.innerText.replace(/\n+/g,' | ').trim()).join('\n');
     try{await navigator.clipboard.writeText(txt)}catch{const t=document.createElement('textarea');t.value=txt;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}
     toast('Log copy hoyeche ('+txt.split('\n').length+' line)')},
@@ -417,7 +430,7 @@ const H={
     go('settings')},
   async aitest(b){$('#aitest').textContent='Testing '+b.dataset.p+'...';const r=await api('/ai/test',{method:'POST',body:{provider:b.dataset.p}});$('#aitest').textContent=r.results.map(x=>`${x.ok?'OK  ':'FAIL'} ${x.id} ${x.ok?(x.ms?x.ms+'ms':'')+' '+(x.text||''):x.err}`).join('\n')},
   tsend(){sendTest()},
-  async treset(){await api('/test-chat/reset',{method:'POST',body:{}});sess=Math.random().toString(36).slice(2,9);go('test')},
+  async treset(){await api('/test-chat/reset',{method:'POST',body:{}});try{localStorage.removeItem('tchat:'+sess)}catch(e){}sess=Math.random().toString(36).slice(2,9);try{localStorage.tsess=sess}catch(e){}go('test')},
 };
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b||b.type==='file'||(b.type==='checkbox'&&b.dataset.a!=='toggle'))return;if(b.dataset.a==='toggle')return;const h=H[b.dataset.a];if(h)run(()=>h(b,e))});
 document.addEventListener('change',e=>{const b=e.target;if(b.dataset&&b.dataset.a==='toggle'||(b.type==='file'&&H[b.dataset.a]))run(()=>H[b.dataset.a](b,e))});

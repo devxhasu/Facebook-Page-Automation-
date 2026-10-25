@@ -10,24 +10,24 @@ const N = require('./notify');
 
 I.add({
   'or.reminder': {
-    bl: ['Apnar {name} order ta ekhono baki ji. Confirm korbo?', '{name} ta ekhono apnar jonno rakha ache ji. Order ta confirm kore dibo?'],
-    bn: ['আপনার {name} অর্ডারটা এখনো বাকি জি। কনফার্ম করবো?', '{name} টা এখনো আপনার জন্য রাখা আছে জি। অর্ডারটা কনফার্ম করে দিবো?'],
+    bl: ['Apnar {name} order ta ekhono baki. Confirm korbo?', '{name} ta ekhono apnar jonno rakha ache. Order ta confirm kore dibo?'],
+    bn: ['আপনার {name} অর্ডারটা এখনো বাকি। কনফার্ম করবো?', '{name} টা এখনো আপনার জন্য রাখা আছে। অর্ডারটা কনফার্ম করে দিবো?'],
     en: ['Your order for {name} is still pending. Shall I confirm it?', 'We are still holding {name} for you. Want me to confirm the order?'],
   },
   'or.review': {
-    bl: ['Apnar order #{id} ta kemon laglo ji? Kono shomossha thakle bolben.', 'Order #{id} peyechen to ji? Product ta kemon laglo bolben.'],
-    bn: ['আপনার অর্ডার #{id} কেমন লাগলো জি? কোনো সমস্যা থাকলে বলবেন।', 'অর্ডার #{id} পেয়েছেন তো জি? প্রোডাক্টটা কেমন লাগলো বলবেন।'],
+    bl: ['Apnar order #{id} ta kemon laglo? Kono shomossha thakle bolben.', 'Order #{id} peyechen to? Product ta kemon laglo bolben.'],
+    bn: ['আপনার অর্ডার #{id} কেমন লাগলো? কোনো সমস্যা থাকলে বলবেন।', 'অর্ডার #{id} পেয়েছেন তো? প্রোডাক্টটা কেমন লাগলো বলবেন।'],
     en: ['How did you like order #{id}? Let us know if anything is wrong.', 'Did order #{id} arrive well? Tell us how you liked it.'],
   },
   'or.coupon': { bl: ' Porer order e {code} code e {pct}% discount pabenn.', bn: ' পরের অর্ডারে {code} কোডে {pct}% ডিসকাউন্ট পাবেন।', en: ' Use code {code} for {pct}% off your next order.' },
   'or.restock': {
-    bl: ['Apni je {name} chaichilen ta ekhon stock e ashche ji. Nite chan?', '{name} abar stock e ashche ji, nibo?'],
-    bn: ['আপনি যে {name} চেয়েছিলেন সেটা এখন স্টকে এসেছে জি। নিতে চান?', '{name} আবার স্টকে এসেছে জি, নিবেন?'],
+    bl: ['Apni je {name} chaichilen ta ekhon stock e ashche. Nite chan?', '{name} abar stock e ashche, nibo?'],
+    bn: ['আপনি যে {name} চেয়েছিলেন সেটা এখন স্টকে এসেছে। নিতে চান?', '{name} আবার স্টকে এসেছে, নিবেন?'],
     en: ['The {name} you wanted is back in stock. Would you like it?', '{name} is available again. Shall I get it for you?'],
   },
   'or.restock_opt': {
-    bl: ['{name} er {value} {option} ta ekhon stock e ashche ji. Nite chan?'],
-    bn: ['{name} এর {value} {option} টা এখন স্টকে এসেছে জি। নিতে চান?'],
+    bl: ['{name} er {value} {option} ta ekhon stock e ashche. Nite chan?'],
+    bn: ['{name} এর {value} {option} টা এখন স্টকে এসেছে। নিতে চান?'],
     en: ['{name} in {option} {value} is back in stock. Would you like it?'],
   },
 });

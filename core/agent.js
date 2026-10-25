@@ -27,10 +27,10 @@ I.add({
   'tr.hold': { bl: ' Parcel ta ekhon hold e ache, courier apnake call korte pare. Phone ta khola rakhben.', bn: ' পার্সেলটা এখন হোল্ডে আছে, কুরিয়ার আপনাকে কল করতে পারে। ফোনটা খোলা রাখবেন।', en: ' Your parcel is on hold; the courier may call you. Please keep your phone on.' },
   'tr.delivered': { bl: ' Courier delivered dekhacche.', bn: ' কুরিয়ার ডেলিভারড দেখাচ্ছে।', en: ' The courier shows it as delivered.' },
   'tr.cancelled': { bl: ' Courier e ei parcel cancel dekhacche, admin ke janacchi.', bn: ' কুরিয়ারে এই পার্সেল ক্যান্সেল দেখাচ্ছে, অ্যাডমিনকে জানাচ্ছি।', en: ' The courier shows this parcel as cancelled; I am informing the admin.' },
-  'ad.ok': { bl: 'Admin ke janalam ji, shighroi reply pabenn.', bn: 'অ্যাডমিনকে জানালাম জি, শীঘ্রই রিপ্লাই পাবেন।', en: 'I have informed the admin; you will get a reply soon.' },
-  'ab.calm': { bl: ['Apnar kotha ta bujhte parchhi ji. Kono shomossha thakle bolun, help korbo.', 'Ji, kono shomossha hole shanto bhabe bolun, ami help korar chesta korbo.'], bn: ['আপনার কথাটা বুঝতে পারছি জি। কোনো সমস্যা থাকলে বলুন, সাহায্য করবো।'], en: ['I understand. If something is wrong, tell me calmly and I will try to help.'] },
-  'ab.firm': { bl: 'Ji, bhalo bhabe kotha bolle ami help korte parbo. Admin ke jaanalam.', bn: 'জি, ভালোভাবে কথা বললে আমি সাহায্য করতে পারবো। অ্যাডমিনকে জানালাম।', en: 'I can help if we keep the chat respectful. I have informed the admin.' },
-  'ah.note': { bl: 'Ekhon amader team offline ji, tobe apnar order ta ami nite pari. Admin shokal e confirm korbe.', bn: 'এখন আমাদের টিম অফলাইন জি, তবে আপনার অর্ডারটা আমি নিতে পারি। অ্যাডমিন সকালে কনফার্ম করবে।', en: 'Our team is offline right now, but I can take your order. The admin will confirm it in the morning.' },
+  'ad.ok': { bl: 'Admin ke janalam, shighroi reply pabenn.', bn: 'অ্যাডমিনকে জানালাম, শীঘ্রই রিপ্লাই পাবেন।', en: 'I have informed the admin; you will get a reply soon.' },
+  'ab.calm': { bl: ['Apnar kotha ta bujhte parchhi. Kono shomossha thakle bolun, help korbo.', 'Kono shomossha hole shanto bhabe bolun, ami help korar chesta korbo.'], bn: ['আপনার কথাটা বুঝতে পারছি। কোনো সমস্যা থাকলে বলুন, সাহায্য করবো।'], en: ['I understand. If something is wrong, tell me calmly and I will try to help.'] },
+  'ab.firm': { bl: 'Bhalo bhabe kotha bolle ami help korte parbo. Admin ke jaanalam.', bn: 'ভালোভাবে কথা বললে আমি সাহায্য করতে পারবো। অ্যাডমিনকে জানালাম।', en: 'I can help if we keep the chat respectful. I have informed the admin.' },
+  'ah.note': { bl: 'Ekhon amader team offline, tobe apnar order ta ami nite pari. Admin shokal e confirm korbe.', bn: 'এখন আমাদের টিম অফলাইন, তবে আপনার অর্ডারটা আমি নিতে পারি। অ্যাডমিন সকালে কনফার্ম করবে।', en: 'Our team is offline right now, but I can take your order. The admin will confirm it in the morning.' },
 });
 const liveTrack = async (o, lg) => {
   if (S.get('live_track_on') === false || !o.tracking || !o.tracking.courier) return '';
@@ -84,6 +84,7 @@ async function getCustomer(ctx) {
 }
 
 async function sendRaw(ctx, text, replies) {
+  text = I.soften(text);
   await col('messages').insertOne({ psid: ctx.psid, role: 'assistant', text, t: Date.now() });
   if (replies && replies.length && ctx.out.quick) { try { await ctx.out.quick(text, replies); return; } catch (e) { L.warn('agent', 'Quick reply pathano jayni, normal message dichhi: ' + e.message); } }
   await ctx.out.text(text);
@@ -289,7 +290,7 @@ async function exec(ctx, name, a, c) {
       if (!o) return { error: 'order_not_found' };
       const r = await O.submitPayment(o, { trx: a.trx_id, sender: a.sender_number || c.phone, amount: a.amount || o.required_now });
       if (!r.ok) return r;
-      await sendRaw(ctx, 'Dhonnobad ji, payment er request peyechi. Admin verify korle order confirm hoye jabe.');
+      await sendRaw(ctx, 'Dhonnobad, payment er request peyechi. Admin verify korle order confirm hoye jabe.');
       return { ok: true, messages_already_sent: true };
     }
     case 'order_status': {
@@ -365,9 +366,9 @@ async function buildSystem(c, isFirst, voice, pageName, hits) {
   return `You are ${S.get('persona_name')}, chatting for the Facebook page "${pageName || S.get('page_name') || 'our shop'}", an online shop in Bangladesh. You are a warm, quick, street-smart shopkeeper chatting on Messenger, not a form and not a script. Tone: ${S.get('tone')}.
 
 STYLE
-- Very short messages: 1 line (max 2), at most 2 messages in total. "ji" for politeness but not in every sentence. NEVER call the customer "apu", "apa", "bhaiya", "sir" or "madam" (you do not know their gender); no pet names. No lists, no bold, no headings, no "Dear customer", no "Thank you for contacting us".
+- Very short messages: 1 line (max 2), at most 2 messages in total. Use "ji" very sparingly: at most once per message and often not at all; never end every sentence with. NEVER end a reply with a generic closing like "Kichu dorkar hole janaben", "Aro kichu lagle bolben", "Kono help lagle janan", "Let me know if you need anything": end after the useful part, or with one specific question. Never say stiff, robotic lines like "Kivabe sahajo korte pari" or "How may I assist you"; just say "Bolun, ki lagbe?". NEVER call the customer "apu", "apa", "bhaiya", "sir" or "madam" (you do not know their gender); no pet names. No lists, no bold, no headings, no "Dear customer", no "Thank you for contacting us".
 - LANGUAGE: ${langRule} Never suggest other websites or shops.
-- Sound human: answer the customer's actual question in the FIRST sentence, then at most one gentle next step. Vary your wording; never start two replies the same way; no corporate phrases. Match their energy (short question = short answer, worried = calm and reassuring in 3-4 words like "Tension nien na ji"). Simple everyday words.
+- Sound human: answer the customer's actual question in the FIRST sentence, then at most one gentle next step. Vary your wording; never start two replies the same way; no corporate phrases. Match their energy (short question = short answer, worried = calm and reassuring in 3-4 words like "Tension nien na"). Simple everyday words.
 - If the customer names a product or category ("T Shirt lagbe"), call search_products at once and show_products; do not ask general questions first. If nothing matches, softly say it is not available now. ${emoji}
 - Ask only ONE question at a time, preferably a choice ("Black na White?") instead of yes/no. Never ask for anything listed under KNOWN. Never repeat what was already said.
 - GREETING: ${greet}. ${isFirst ? 'This is the first message of this customer: if they greeted with salam answer "Walaikum assalam"; if they did not greet and style allows, start with "Assalamu alaikum" plus one short welcome line.' : 'Not the first message: do not greet again.'}
@@ -414,13 +415,13 @@ EXAMPLES OF THE RIGHT VOICE (shown in Banglish; copy the warmth and shortness in
 Customer: T Shirt lagbe
 You: [call search_products then show_products] "Ji, Black T Shirt ache, 500 tk. Size S/M/L/XL, kon size dibo?"
 Customer: M
-You: "Darun, M size. Apnar phone number ar puro address ta din ji."
+You: "Darun, M size. Apnar phone number ar puro address ta din."
 Customer: (gives phone + address)
-You: [call update_customer, calc_order] "Dhonnobad ji. Upore hishab ta dilam, thik thakle payment kivabe korben, delivery advance (60 tk) na full?"
+You: [call update_customer, calc_order] "Dhonnobad. Upore hishab ta dilam, thik thakle payment kivabe korben, delivery advance (60 tk) na full?"
 Customer: dam kom hobe?
-You: "Ji, quality ta bhalo tai dam fixed. 2 ta nile delivery charge free hobe ji."
+You: "Quality ta bhalo tai dam fixed. 2 ta nile delivery charge free hobe."
 Customer: ache?  (product not in catalog)
-You: "Ji, eta ekhon amader kache nai. Onno kichu dekhabo?"
+You: "Eta ekhon amader kache nai. Onno kichu dekhabo?"
 Never say "ami check kori / calculate kori / wait korun" before acting: just call the tool and then reply with the result.
 
 KNOWN ABOUT THIS CUSTOMER
